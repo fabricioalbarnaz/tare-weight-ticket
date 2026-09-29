@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+FROM node:24-alpine AS base
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json package-lock.json ./
+COPY apps/core-service/package.json apps/core-service/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN npm ci
+
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY apps/core-service apps/core-service
+RUN npm run build --workspace=@tare/shared
+RUN npm run build --workspace=@tare/core-service
+
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY --from=deps /app/package.json /app/package-lock.json ./
+COPY --from=deps /app/apps/core-service/package.json apps/core-service/package.json
+COPY --from=deps /app/packages/shared/package.json packages/shared/package.json
+COPY --from=deps /app/node_modules node_modules
+RUN npm prune --omit=dev
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/apps/core-service/dist apps/core-service/dist
+
+ENV PORT=3000
+EXPOSE 3000
+CMD ["node", "apps/core-service/dist/server.js"]

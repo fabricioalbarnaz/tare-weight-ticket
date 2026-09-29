@@ -1,0 +1,13 @@
+services:
+  core-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.core-service
+    restart: unless-stopped
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      PORT: 3000
+    env_file:
+      - path: ../.env
+        required: false
