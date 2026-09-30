@@ -126,6 +126,30 @@ folded into the master plan and `CLAUDE.md` so nothing is lost. Say
 "continue" to move on to Phase 2 (scale integration: TCP client for the
 Digi-Tron Isis New, stability-wait logic, protocol parser).
 
+**Post-review fix (2026-09-30):** GitHub Actions CI failed on the "Build
+core-service Docker image" step with
+`process "/bin/sh -c npm ci" did not complete successfully: exit code: 1`.
+Root cause: `better-sqlite3` (added in step 1 of this phase) is a native
+module. `docker/Dockerfile.core-service` uses `node:24-alpine` for every
+stage, and Alpine (musl libc, no C/C++ toolchain by default) has no
+guaranteed matching prebuilt binary, so `npm ci` falls back to compiling
+from source via `node-gyp` — which fails with no compiler present. This
+slipped through because the Docker build was last verified in Phase 0,
+*before* `better-sqlite3` existed; Phase 1's local verification only ran
+`npm run build`/`npm run test` directly on macOS, where a prebuilt darwin
+binary downloads fine, so it never re-exercised the Alpine/musl path.
+Fixed by adding `RUN apk add --no-cache python3 make g++` to the `deps`
+stage only, before `npm ci` — confirmed necessary and sufficient: a
+rebuild's log explicitly showed
+`better-sqlite3@13.0.3 (install: node-gyp rebuild)` succeeding with the
+toolchain present, the image now builds clean with `--no-cache`, and the
+container runs and serves `GET /health` correctly. Doesn't affect the
+final image size/content since the toolchain never leaves the
+intermediate `deps` stage in this multi-stage build.
+**Lesson for later phases:** re-run the Docker build (not just
+`npm run build`/`test` on the host) whenever a phase adds or changes a
+native/platform-sensitive dependency, not only in Phase 0.
+
 ## Explicitly not in this phase
 
 - No HTTP routes for entrance/exit events yet (Phase 3 wires the camera
