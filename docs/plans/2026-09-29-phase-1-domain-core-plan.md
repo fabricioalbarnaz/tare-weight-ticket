@@ -150,6 +150,25 @@ intermediate `deps` stage in this multi-stage build.
 `npm run build`/`test` on the host) whenever a phase adds or changes a
 native/platform-sensitive dependency, not only in Phase 0.
 
+**Post-review fix (2026-09-30, code review):** an automated review flagged
+that `repository.ts`'s `updateEntry` and `close` only filtered their
+`UPDATE` by `tickets.id`, not also by `status = 'OPEN'`. Verified as a
+real gap: current callers (`session-service.ts`) happen to pre-check via
+`findOpenByPlate` before calling either method, but the repository itself
+had nothing stopping a future/other caller from silently mutating an
+already-`CLOSED`/`ANOMALY` ticket — e.g. closing the same ticket twice
+would recompute and overwrite `netWeightKg`/`exitAt`/etc. on a ticket
+that's supposed to be terminal. There was also a real type/runtime gap:
+both methods declared a non-nullable `Ticket` return type, but Drizzle's
+`.get()` can return `undefined` when the `WHERE` matches nothing, and
+nothing checked for that. Fixed both methods to filter on
+`and(eq(tickets.id, ticketId), eq(tickets.status, 'OPEN'))` and to throw
+explicitly (`"...not found or not OPEN"`) when no row comes back;
+`close()`'s existing `requireById` missing-ticket check (needed before the
+update, to read `entryWeightKg` for the net-weight calc) is unchanged.
+Added two repository tests covering both refusal paths. 33 tests passing;
+lint/typecheck/test/build all still pass.
+
 ## Explicitly not in this phase
 
 - No HTTP routes for entrance/exit events yet (Phase 3 wires the camera

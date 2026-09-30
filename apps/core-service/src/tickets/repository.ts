@@ -95,7 +95,7 @@ export function createTicketRepository(db: Db): TicketRepository {
     },
 
     updateEntry(ticketId, input) {
-      return db
+      const updated = db
         .update(tickets)
         .set({
           entryAt: input.entryAt,
@@ -104,9 +104,14 @@ export function createTicketRepository(db: Db): TicketRepository {
           entryCaptureFailed: input.entryCaptureFailed,
           updatedAt: new Date(),
         })
-        .where(eq(tickets.id, ticketId))
+        .where(and(eq(tickets.id, ticketId), eq(tickets.status, 'OPEN')))
         .returning()
         .get();
+
+      if (!updated) {
+        throw new Error(`Cannot update entry for ticket ${ticketId}: not found or not OPEN`);
+      }
+      return updated;
     },
 
     close(ticketId, input) {
@@ -116,7 +121,7 @@ export function createTicketRepository(db: Db): TicketRepository {
           ? calculateNetWeightKg(current.entryWeightKg, input.exitWeightKg)
           : null;
 
-      return db
+      const closed = db
         .update(tickets)
         .set({
           status: 'CLOSED',
@@ -127,9 +132,14 @@ export function createTicketRepository(db: Db): TicketRepository {
           netWeightKg,
           updatedAt: new Date(),
         })
-        .where(eq(tickets.id, ticketId))
+        .where(and(eq(tickets.id, ticketId), eq(tickets.status, 'OPEN')))
         .returning()
         .get();
+
+      if (!closed) {
+        throw new Error(`Cannot close ticket ${ticketId}: not found or not OPEN`);
+      }
+      return closed;
     },
 
     flagAnomaly(input) {

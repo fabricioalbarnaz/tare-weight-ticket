@@ -110,6 +110,56 @@ describe('TicketRepository', () => {
     expect(repo.findOpenByPlate('RET1234')?.id).toBe(created.id);
   });
 
+  it('refuses to updateEntry on a ticket that is no longer OPEN', () => {
+    const created = repo.create({
+      plate: 'DONE0001',
+      entryAt: new Date(),
+      entryWeightKg: 1000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+    repo.close(created.id, {
+      exitAt: new Date(),
+      exitWeightKg: 500,
+      exitCameraId: 'cam-2',
+      exitCaptureFailed: false,
+    });
+
+    expect(() =>
+      repo.updateEntry(created.id, {
+        entryAt: new Date(),
+        entryWeightKg: 999,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      }),
+    ).toThrow(/not found or not OPEN/);
+  });
+
+  it('refuses to close a ticket a second time', () => {
+    const created = repo.create({
+      plate: 'DONE0002',
+      entryAt: new Date(),
+      entryWeightKg: 1000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+    repo.close(created.id, {
+      exitAt: new Date(),
+      exitWeightKg: 500,
+      exitCameraId: 'cam-2',
+      exitCaptureFailed: false,
+    });
+
+    expect(() =>
+      repo.close(created.id, {
+        exitAt: new Date(),
+        exitWeightKg: 999,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      }),
+    ).toThrow(/not found or not OPEN/);
+  });
+
   it('closes a ticket and computes the net weight (arrive loaded, leave empty)', () => {
     const created = repo.create({
       plate: 'LOAD001',
