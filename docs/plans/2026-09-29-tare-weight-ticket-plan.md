@@ -127,13 +127,15 @@ Each balance PC runs one self-contained stack:
 | id | PK |
 | plate | normalized plate text |
 | status | `OPEN`, `CLOSED`, `ANOMALY` |
-| entry_at | timestamp |
+| entry_at | timestamp, **nullable** — an `ANOMALY` ticket created from an exit-without-entrance event (§5) has no entry data at all |
 | entry_weight_kg | nullable until captured |
 | entry_camera_id | which camera fired |
+| entry_capture_failed | bool, set when the scale read timeout in §5 hits on the entrance leg (added during Phase 1 implementation to represent that rule in the data model) |
 | exit_at | timestamp, nullable |
 | exit_weight_kg | nullable |
 | exit_camera_id | nullable |
-| net_weight_kg | computed on close = `abs(entry - exit)` |
+| exit_capture_failed | bool, same as `entry_capture_failed` but for the exit leg |
+| net_weight_kg | computed on close = `abs(entry - exit)`; left `null` if either weight is missing (e.g. an `entry_capture_failed` ticket) — a `CLOSED` ticket with `net_weight_kg: null` is the signal for the admin UI to surface it as needing attention |
 | ticket_number | sequential, human-facing |
 | printed_at | nullable |
 | created_by_admin | bool, true if manually created/fixed |

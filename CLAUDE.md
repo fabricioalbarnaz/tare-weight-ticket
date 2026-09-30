@@ -4,15 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 0 (scaffolding) is complete and verified end-to-end — see
-`docs/plans/2026-09-29-phase-0-scaffolding-plan.md`. npm workspaces,
+Phase 0 (scaffolding) is complete and verified end-to-end. npm workspaces,
 TS/ESLint/Prettier, and a minimal `@tare/core-service` Fastify app (with a
-`/health` route and one Vitest test) exist; `npm run lint`,
-`npm run typecheck`, `npm run test`, and `npm run build` all pass from the
-repo root under Node 24, and
-`docker build -f docker/Dockerfile.core-service .` builds and runs
-successfully (verified `GET /health` from inside the running container).
-Awaiting user review before starting Phase 1.
+`/health` route) exist; `docker build -f docker/Dockerfile.core-service .`
+builds and runs successfully (verified `GET /health` from inside the
+running container).
+
+Phase 1 (domain core) is complete — see
+`docs/plans/2026-09-29-phase-1-domain-core-plan.md` for the full
+step-by-step history and the design decisions made along the way (most
+notably: `entryAt` is nullable to support `ANOMALY` tickets created from an
+exit-without-entrance event, and scale timeouts are handled by the same
+entrance/exit handlers rather than a separate code path). `core-service`
+now has: a Drizzle/SQLite schema and migrations (`src/db/`), a ticket
+repository (`src/tickets/repository.ts`), and a session service
+(`src/tickets/session-service.ts`) implementing every business rule from
+the master plan's §5, all backed by real temp-file SQLite DBs in tests (no
+mocking the DB). `npm run lint`, `npm run typecheck`, `npm run test` (31
+tests), and `npm run build` all pass from the repo root under Node 24.
+Nothing is wired into HTTP routes yet — that starts in Phase 3.
+Awaiting user review before starting Phase 2 (scale integration).
 
 Before doing any work here, read the latest file in `docs/plans/` (currently
 `docs/plans/2026-09-29-tare-weight-ticket-plan.md`) in full — it is the
