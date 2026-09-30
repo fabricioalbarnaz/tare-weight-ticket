@@ -57,40 +57,42 @@ export function createSessionService(repo: TicketRepository): SessionService {
         return { kind: 'plate_unreadable' };
       }
 
-      const existing = repo.findOpenByPlate(plate);
-      const action = input.weightCaptureFailed
-        ? TICKET_AUDIT_ACTIONS.ENTRY_CAPTURE_FAILED
-        : existing
-          ? TICKET_AUDIT_ACTIONS.ENTRY_OVERWRITTEN
-          : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED;
+      return repo.transaction((): EntranceResult => {
+        const existing = repo.findOpenByPlate(plate);
+        const action = input.weightCaptureFailed
+          ? TICKET_AUDIT_ACTIONS.ENTRY_CAPTURE_FAILED
+          : existing
+            ? TICKET_AUDIT_ACTIONS.ENTRY_OVERWRITTEN
+            : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED;
 
-      const ticket = existing
-        ? repo.updateEntry(existing.id, {
-            entryAt: input.timestamp,
-            entryWeightKg: input.weightKg,
-            entryCameraId: input.cameraId,
-            entryCaptureFailed: input.weightCaptureFailed,
-          })
-        : repo.create({
-            plate,
-            entryAt: input.timestamp,
-            entryWeightKg: input.weightKg,
-            entryCameraId: input.cameraId,
-            entryCaptureFailed: input.weightCaptureFailed,
-          });
+        const ticket = existing
+          ? repo.updateEntry(existing.id, {
+              entryAt: input.timestamp,
+              entryWeightKg: input.weightKg,
+              entryCameraId: input.cameraId,
+              entryCaptureFailed: input.weightCaptureFailed,
+            })
+          : repo.create({
+              plate,
+              entryAt: input.timestamp,
+              entryWeightKg: input.weightKg,
+              entryCameraId: input.cameraId,
+              entryCaptureFailed: input.weightCaptureFailed,
+            });
 
-      repo.appendAuditLog(ticket.id, 'system', action, {
-        weightKg: input.weightKg,
-        cameraId: input.cameraId,
-        isRetrigger: Boolean(existing),
+        repo.appendAuditLog(ticket.id, 'system', action, {
+          weightKg: input.weightKg,
+          cameraId: input.cameraId,
+          isRetrigger: Boolean(existing),
+        });
+        repo.recordRawEvent(
+          'camera_entrance',
+          { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+          ticket.id,
+        );
+
+        return { kind: existing ? 'ticket_retriggered' : 'ticket_opened', ticket };
       });
-      repo.recordRawEvent(
-        'camera_entrance',
-        { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
-        ticket.id,
-      );
-
-      return { kind: existing ? 'ticket_retriggered' : 'ticket_opened', ticket };
     },
 
     handleExitReading(input) {
@@ -105,48 +107,55 @@ export function createSessionService(repo: TicketRepository): SessionService {
         return { kind: 'plate_unreadable' };
       }
 
-      const existing = repo.findOpenByPlate(plate);
+      return repo.transaction((): ExitResult => {
+        const existing = repo.findOpenByPlate(plate);
 
-      if (existing) {
-        const ticket = repo.close(existing.id, {
+        if (existing) {
+          const ticket = repo.close(existing.id, {
+            exitAt: input.timestamp,
+            exitWeightKg: input.weightKg,
+            exitCameraId: input.cameraId,
+            exitCaptureFailed: input.weightCaptureFailed,
+          });
+          repo.appendAuditLog(
+            ticket.id,
+            'system',
+            input.weightCaptureFailed
+              ? TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED
+              : TICKET_AUDIT_ACTIONS.EXIT_CAPTURED,
+            { weightKg: input.weightKg, cameraId: input.cameraId },
+          );
+          repo.recordRawEvent(
+            'camera_exit',
+            {
+              rawPlate: input.rawPlate,
+              plate,
+              cameraId: input.cameraId,
+              timestamp: input.timestamp,
+            },
+            ticket.id,
+          );
+          return { kind: 'ticket_closed', ticket };
+        }
+
+        const ticket = repo.flagAnomaly({
+          plate,
           exitAt: input.timestamp,
           exitWeightKg: input.weightKg,
           exitCameraId: input.cameraId,
           exitCaptureFailed: input.weightCaptureFailed,
         });
-        repo.appendAuditLog(
-          ticket.id,
-          'system',
-          input.weightCaptureFailed
-            ? TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED
-            : TICKET_AUDIT_ACTIONS.EXIT_CAPTURED,
-          { weightKg: input.weightKg, cameraId: input.cameraId },
-        );
+        repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ANOMALY_FLAGGED, {
+          weightKg: input.weightKg,
+          cameraId: input.cameraId,
+        });
         repo.recordRawEvent(
           'camera_exit',
           { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
           ticket.id,
         );
-        return { kind: 'ticket_closed', ticket };
-      }
-
-      const ticket = repo.flagAnomaly({
-        plate,
-        exitAt: input.timestamp,
-        exitWeightKg: input.weightKg,
-        exitCameraId: input.cameraId,
-        exitCaptureFailed: input.weightCaptureFailed,
+        return { kind: 'anomaly_flagged', ticket };
       });
-      repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ANOMALY_FLAGGED, {
-        weightKg: input.weightKg,
-        cameraId: input.cameraId,
-      });
-      repo.recordRawEvent(
-        'camera_exit',
-        { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
-        ticket.id,
-      );
-      return { kind: 'anomaly_flagged', ticket };
     },
   };
 }

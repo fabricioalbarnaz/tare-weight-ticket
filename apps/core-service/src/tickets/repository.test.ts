@@ -254,4 +254,37 @@ describe('TicketRepository', () => {
       repo.recordRawEvent('camera_entrance', { plate: '', raw: 'unreadable' }),
     ).not.toThrow();
   });
+
+  it('commits all writes made inside a successful transaction', () => {
+    const ticket = repo.transaction(() => {
+      const created = repo.create({
+        plate: 'TXOK0001',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(created.id, 'system', 'entry_captured', { weightKg: 1000 });
+      return created;
+    });
+
+    expect(repo.findById(ticket.id)?.plate).toBe('TXOK0001');
+  });
+
+  it('rolls back all writes made inside a failed transaction', () => {
+    expect(() =>
+      repo.transaction(() => {
+        repo.create({
+          plate: 'TXFAIL01',
+          entryAt: new Date(),
+          entryWeightKg: 1000,
+          entryCameraId: 'cam-1',
+          entryCaptureFailed: false,
+        });
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+
+    expect(repo.findOpenByPlate('TXFAIL01')).toBeUndefined();
+  });
 });

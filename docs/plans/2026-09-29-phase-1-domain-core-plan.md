@@ -169,6 +169,34 @@ update, to read `entryWeightKg` for the net-weight calc) is unchanged.
 Added two repository tests covering both refusal paths. 33 tests passing;
 lint/typecheck/test/build all still pass.
 
+**Post-review fix (2026-09-30, code review):** a review flagged that
+`session-service.ts`'s entrance/exit handlers weren't transactional — the
+find/write/audit-log/raw-event sequence for each reading was several
+separate statements, so a crash mid-sequence (e.g. after `close()`
+succeeds but before `appendAuditLog()` runs) could leave a `CLOSED` ticket
+with no audit trail. The review's specific instruction ("use the
+repository's transaction mechanism") didn't match current code — no such
+mechanism existed — so this required adding one, not just using it.
+Verified the underlying concern was real despite better-sqlite3 being
+fully synchronous (which rules out request-level race conditions, since
+nothing can interleave mid-handler in a single-threaded process): crash-
+safety across the multi-statement sequence was still a genuine gap.
+Added `TicketRepository.transaction<T>(fn: () => T): T`, a synchronous
+wrapper over Drizzle's `db.transaction()` (confirmed synchronous for the
+better-sqlite3 driver by checking `drizzle-orm`'s own type declarations
+rather than assuming). Because better-sqlite3 has exactly one connection,
+any repository call made via the same `db` instance while inside an active
+`db.transaction()` automatically participates in it — no need to thread a
+separate `tx`-scoped repository through the call. Wrapped both handlers'
+bodies (from `findOpenByPlate` through the final `recordRawEvent`) in
+`repo.transaction(() => {...})`, matching the review's ask to include the
+`findOpenByPlate` check inside the transaction. Added two repository-level
+tests that directly exercise commit and rollback against a real temp-file
+DB (not mocked) — the rollback test creates a ticket then throws inside
+the transaction and asserts the ticket was never persisted, which is the
+actual behavior this fix is supposed to guarantee, not just that it
+compiles. 35 tests passing; lint/typecheck/test/build all still pass.
+
 ## Explicitly not in this phase
 
 - No HTTP routes for entrance/exit events yet (Phase 3 wires the camera

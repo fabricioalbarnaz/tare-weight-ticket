@@ -44,6 +44,12 @@ export interface TicketRepository {
   flagAnomaly(input: FlagAnomalyInput): Ticket;
   appendAuditLog(ticketId: number, actor: string, action: string, payload?: unknown): void;
   recordRawEvent(source: RawEventSource, rawPayload: unknown, linkedTicketId?: number): void;
+  /**
+   * Runs `fn` inside a single SQLite transaction: all repository calls made
+   * inside it (via this same repository instance) commit together, or roll
+   * back together if `fn` throws. Synchronous, matching better-sqlite3.
+   */
+  transaction<T>(fn: () => T): T;
 }
 
 export function createTicketRepository(db: Db): TicketRepository {
@@ -182,6 +188,10 @@ export function createTicketRepository(db: Db): TicketRepository {
           linkedTicketId: linkedTicketId ?? null,
         })
         .run();
+    },
+
+    transaction(fn) {
+      return db.transaction(() => fn());
     },
   };
 }
