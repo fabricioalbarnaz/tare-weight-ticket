@@ -1,6 +1,6 @@
 # Tare Weight Ticket System — Development Plan
 
-Status: **Approved — Phases 0–1 complete (merged in PR #1); Phase 2 not started.**
+Status: **Approved — Phases 0–1 complete (merged in PR #1); Phases 2–3 implemented, pending review/PR.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -375,3 +375,42 @@ alone (the per-phase working plans were deleted after merge, per
   changed**, not just `npm run build`/`test` on the host. `better-sqlite3`
   needs `python3 make g++` in the Alpine `deps` stage; this only showed up
   in CI because local builds used a prebuilt binary.
+
+Decisions and lessons from Phases 2–3 (not obvious from the code alone;
+the per-feature working plan is deleted after merge, per `CLAUDE.md`):
+
+- **Scale protocol is still a placeholder.** `src/scale/placeholder-frame-parser.ts`
+  implements a made-up ASCII line format (`<ST|US>,<weightKg>`) explicitly
+  documented as NOT the real Digi-Tron Isis New wire format — it exists so
+  `ScaleFrameParser`/`ScaleClient` and the stability-wait logic could be
+  built and tested now (master plan §7.2). Swapping in the real parser once
+  the vendor manual/hardware arrives means writing a new
+  `ScaleFrameParser` implementation and changing one `createParser` call
+  in `server.ts`; nothing else (TCP client, webhook routes, session
+  service) needs to change.
+- **`ScaleClient.readStableWeight()` keeps one persistent TCP connection**
+  open across calls rather than reconnecting per read (an indicator
+  streams continuously; reconnecting per truck would be wasteful and
+  slower). Connection failures and stability timeouts both resolve the
+  same way — `{ weightKg: null, weightCaptureFailed: true }` — matching
+  the master plan §5 rule that a scale hiccup must never block the driver
+  signal. Reconnect/retry *resilience* (vs. just not crashing) is
+  Phase 8 (Hardening) scope, not Phase 2.
+- **Camera payload shape is also a placeholder**, for the same reason as
+  the scale protocol: the real camera model isn't chosen yet (master plan
+  §7.3). `src/camera/payload-schema.ts` + `normalize.ts` isolate the
+  generic `{ plate, cameraId, timestamp }` shape from the routes and
+  session service, so only those two files change once the real vendor
+  payload is known.
+- **Webhook routes return HTTP 200 for every business-level outcome**
+  (`ticket_opened`, `ticket_retriggered`, `ticket_closed`,
+  `anomaly_flagged`, `plate_unreadable`) — only a malformed request body
+  (missing `cameraId`) is a 400. An unreadable plate or an exit-without-
+  entrance anomaly are expected, handled outcomes per master plan §5, not
+  errors.
+- **`buildApp()` now takes `{ db, scaleClient }`** instead of building its
+  own dependencies, so tests can inject a real temp-file SQLite db (same
+  "no mocking the DB" approach as Phase 1) alongside a fake `ScaleClient`.
+  `server.ts` is the only place that builds the real `Db` (from `DB_PATH`)
+  and the real `createTcpScaleClient` (from `SCALE_*` env vars) for
+  production.
