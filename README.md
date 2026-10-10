@@ -23,6 +23,20 @@ npm run typecheck
 npm run test
 ```
 
+### Admin UI
+
+`apps/admin-ui` is a standalone React/Vite SPA. By default it runs against
+an in-memory mock of the admin API (via MSW), so it's fully usable before
+the real backend routes exist:
+
+```
+npm run dev --workspace=@tare/admin-ui
+```
+
+Sign in with `admin` / `admin123` (the mock credentials). Set
+`VITE_API_MODE=proxy` (see `apps/admin-ui/.env.example`) to instead proxy
+`/api` to a real `core-service` running on `localhost:3000`.
+
 ## Docker
 
 ```
