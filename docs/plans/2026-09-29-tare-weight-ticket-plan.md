@@ -1,6 +1,6 @@
 # Tare Weight Ticket System — Development Plan
 
-Status: **Draft — awaiting review, not yet implemented.**
+Status: **Approved — Phases 0–1 complete (merged in PR #1); Phase 2 not started.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -256,6 +256,12 @@ flagging them now so they're deliberate decisions, not surprises mid-build:
    polling vs. push) to write the real parser. Phase 2 starts with a spike:
    capture raw TCP traffic against the actual indicator (or its simulator)
    before finalizing the parser.
+   **As of 2026-10-10:** neither the vendor manual nor access to the
+   indicator/simulator is available yet. Phase 2 should therefore start
+   with a pluggable frame-parser interface plus a mock TCP scale server,
+   so the stability-wait logic and session wiring can be built and tested
+   now; the real Isis New parser and captured-frame fixtures are added
+   once the manual or hardware access arrives.
 3. **Exact camera model/webhook payload format.** "Pushes an HTTP webhook"
    covers many ANPR vendors with different JSON/XML shapes and auth
    schemes. Phase 3 needs the actual camera model to build the exact
@@ -336,3 +342,36 @@ runnable (even if incomplete) at the end of every phase.
 - No microservices split beyond Core Service / Print Bridge (split only
   forced by the Windows USB constraint, not by scale).
 - No built-in multi-balance aggregation yet (see Phase 9).
+
+## 11. Implementation notes from completed phases
+
+Decisions and lessons from Phases 0–1 that are not obvious from the code
+alone (the per-phase working plans were deleted after merge, per
+`CLAUDE.md`):
+
+- **Node 24** is the pinned runtime (Active LTS; `.nvmrc`, `engines`,
+  Docker base image). A project-level `.npmrc` pins the public npm
+  registry so a personal/corporate `~/.npmrc` can't leak authenticated
+  proxy URLs into `package-lock.json`.
+- **`entry_at` is nullable** (see §4): an `ANOMALY` ticket created from an
+  exit-without-entrance event has no entrance data at all.
+- **Scale timeout is not a separate code path**: the same entrance/exit
+  handlers in `session-service.ts` are called with `weightKg: null,
+  weightCaptureFailed: true`. A timeout changes whether a weight was
+  recorded, not which ticket operation happens.
+- **No `updateExit`**: closing a ticket always sets the exit fields and
+  moves it to `CLOSED` in one step. A `CLOSED` ticket with
+  `net_weight_kg: null` (a leg failed to capture) is how the admin UI
+  will find tickets that need attention, so no 4th status was added.
+- **Repository guards**: `updateEntry`/`close` only touch rows with
+  `status = 'OPEN'` and throw if nothing matched, so terminal tickets
+  can't be silently mutated.
+- **Transactions**: `TicketRepository.transaction(fn)` wraps Drizzle's
+  synchronous better-sqlite3 transaction. Each session handler runs its
+  whole find → write → audit-log → raw-event sequence inside one
+  transaction, so a crash mid-sequence can't leave a ticket without its
+  audit trail.
+- **Re-run `docker build` whenever a native dependency is added or
+  changed**, not just `npm run build`/`test` on the host. `better-sqlite3`
+  needs `python3 make g++` in the Alpine `deps` stage; this only showed up
+  in CI because local builds used a prebuilt binary.
