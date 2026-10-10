@@ -26,4 +26,25 @@ describe('loadScaleConfig', () => {
       connectTimeoutMs: 3000,
     });
   });
+
+  it('throws when SCALE_PORT is not a positive integer', () => {
+    expect(() => loadScaleConfig({ SCALE_PORT: 'not-a-number' })).toThrow(/SCALE_PORT/);
+  });
+
+  it('throws when a numeric env var is an empty string', () => {
+    expect(() => loadScaleConfig({ SCALE_PORT: '' })).toThrow(/SCALE_PORT/);
+  });
+
+  it('throws when a numeric env var is zero or negative', () => {
+    expect(() => loadScaleConfig({ SCALE_STABILITY_TIMEOUT_MS: '0' })).toThrow(
+      /SCALE_STABILITY_TIMEOUT_MS/,
+    );
+    expect(() => loadScaleConfig({ SCALE_CONNECT_TIMEOUT_MS: '-5' })).toThrow(
+      /SCALE_CONNECT_TIMEOUT_MS/,
+    );
+  });
+
+  it('throws when a numeric env var is not an integer', () => {
+    expect(() => loadScaleConfig({ SCALE_PORT: '4001.5' })).toThrow(/SCALE_PORT/);
+  });
 });

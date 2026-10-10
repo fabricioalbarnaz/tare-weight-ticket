@@ -13,6 +13,8 @@ export interface ScaleClientOptions {
 
 type Waiter = (frame: ParsedWeightFrame | null) => void;
 
+const KEEP_ALIVE_DELAY_MS = 10_000;
+
 export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   const connectTimeoutMs = options.connectTimeoutMs ?? 5000;
 
@@ -20,6 +22,12 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   let parser: ScaleFrameParser | null = null;
   let connectPromise: Promise<net.Socket> | null = null;
   let waiters: Waiter[] = [];
+  // The scale is one physical resource: serialize reads so two concurrent
+  // webhooks (entrance/exit) can never both be resolved by the same frame.
+  let readQueue: Promise<ScaleReadResult> = Promise.resolve({
+    weightKg: null,
+    weightCaptureFailed: true,
+  });
 
   function failAllWaiters(): void {
     const pending = waiters;
@@ -28,8 +36,13 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   }
 
   function teardown(): void {
-    socket?.removeAllListeners();
-    socket?.destroy();
+    if (socket) {
+      socket.removeAllListeners();
+      // Swallow any error emitted while/after destroying; an 'error' event
+      // with zero listeners crashes the process.
+      socket.on('error', () => {});
+      socket.destroy();
+    }
     socket = null;
     parser = null;
     connectPromise = null;
@@ -56,6 +69,7 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
       sock.connect(options.port, options.host, () => {
         sock.setTimeout(0);
         sock.removeListener('error', onConnectFailure);
+        sock.setKeepAlive(true, KEEP_ALIVE_DELAY_MS);
 
         parser = options.createParser();
         socket = sock;
@@ -80,31 +94,40 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     return connectPromise;
   }
 
+  async function readOne(): Promise<ScaleReadResult> {
+    try {
+      await connect();
+    } catch {
+      return { weightKg: null, weightCaptureFailed: true };
+    }
+
+    return new Promise<ScaleReadResult>((resolve) => {
+      const waiter: Waiter = (frame) => {
+        clearTimeout(timer);
+        resolve(
+          frame === null
+            ? { weightKg: null, weightCaptureFailed: true }
+            : { weightKg: frame.weightKg, weightCaptureFailed: false },
+        );
+      };
+
+      const timer = setTimeout(() => {
+        waiters = waiters.filter((pending) => pending !== waiter);
+        // Force a reconnect on the next read: otherwise a frame that settles
+        // just after this timeout could answer a later, unrelated read.
+        teardown();
+        resolve({ weightKg: null, weightCaptureFailed: true });
+      }, options.stabilityTimeoutMs);
+
+      waiters.push(waiter);
+    });
+  }
+
   return {
-    async readStableWeight(): Promise<ScaleReadResult> {
-      try {
-        await connect();
-      } catch {
-        return { weightKg: null, weightCaptureFailed: true };
-      }
-
-      return new Promise<ScaleReadResult>((resolve) => {
-        const waiter: Waiter = (frame) => {
-          clearTimeout(timer);
-          resolve(
-            frame === null
-              ? { weightKg: null, weightCaptureFailed: true }
-              : { weightKg: frame.weightKg, weightCaptureFailed: false },
-          );
-        };
-
-        const timer = setTimeout(() => {
-          waiters = waiters.filter((pending) => pending !== waiter);
-          resolve({ weightKg: null, weightCaptureFailed: true });
-        }, options.stabilityTimeoutMs);
-
-        waiters.push(waiter);
-      });
+    readStableWeight(): Promise<ScaleReadResult> {
+      const result = readQueue.then(readOne, readOne);
+      readQueue = result;
+      return result;
     },
 
     close() {

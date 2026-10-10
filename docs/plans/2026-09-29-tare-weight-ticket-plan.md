@@ -414,3 +414,26 @@ the per-feature working plan is deleted after merge, per `CLAUDE.md`):
   `server.ts` is the only place that builds the real `Db` (from `DB_PATH`)
   and the real `createTcpScaleClient` (from `SCALE_*` env vars) for
   production.
+- **`ScaleClient.readStableWeight()` serializes reads** behind an internal
+  promise queue. The scale is one physical resource shared by both the
+  entrance and exit routes; without serialization, two concurrent webhook
+  requests could both be resolved by the same incoming stable frame
+  (PR review feedback). On a stability timeout, the client also tears the
+  connection down (instead of just resolving the pending read), so a frame
+  that settles just after the timeout can never be mistaken for a later,
+  unrelated read — the cost (one extra reconnect) is paid only on the rare
+  timeout path, not on every read.
+- **`loadScaleConfig` rejects malformed `SCALE_*` env vars at startup**
+  (non-integer, zero/negative, or an empty string) instead of letting
+  `Number()` silently coerce them to `0`/`NaN` (PR review feedback) — on a
+  PC installed without a developer nearby, a bad `.env` value should fail
+  loudly on boot, not cause a silent, confusing scale read failure later.
+- **The TCP client re-attaches a no-op `'error'` listener during
+  teardown**, after `removeAllListeners()` and before `destroy()` (PR
+  review feedback): an `'error'` event with zero listeners crashes the
+  Node process, and `removeAllListeners()` would otherwise leave exactly
+  that gap for the remainder of `destroy()`. Keep-alive
+  (`socket.setKeepAlive`) was also added so a silent half-open disconnect
+  (e.g. the indicator loses power without a clean TCP close) is eventually
+  detected and reconnected, instead of leaving every future read timing
+  out forever until the service is restarted.

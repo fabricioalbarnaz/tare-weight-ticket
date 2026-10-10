@@ -33,8 +33,13 @@ tests; `src/camera/` has the entrance/exit webhook routes, a generic
 payload schema + normalization layer (real camera vendor still pending,
 master plan §7.3), wired into the session service. `buildApp()` now takes
 `{ db, scaleClient }`; `server.ts` builds the real SQLite db (`DB_PATH`)
-and TCP scale client (`SCALE_*` env vars) for production use. `npm run
-lint`, `npm run typecheck`, `npm run test` (61 tests), and `npm run build`
+and TCP scale client (`SCALE_*` env vars) for production use. PR review
+also caught and fixed: a shared-scale-client race between concurrent
+entrance/exit webhooks (reads are now serialized), a Dockerfile missing
+the `drizzle/` migrations folder in the runtime stage, and a couple of
+TCP-client robustness gaps (crash on teardown, no reconnect after a
+stability timeout) — see the master plan's §11 for details. `npm run
+lint`, `npm run typecheck`, `npm run test` (67 tests), and `npm run build`
 all pass from the repo root under Node 24.
 
 Next: Phase 4 (driver signal adapter), not started yet.

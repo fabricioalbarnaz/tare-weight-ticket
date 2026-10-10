@@ -68,13 +68,36 @@ be swapped in later without touching business logic.
 - [x] Step 12: update `app.test.ts` for the new `buildApp` signature.
 - [x] Step 13: docs — update master plan status line + §11 implementation
       notes for Phase 2/3 decisions, update `CLAUDE.md` project status.
-- [x] Step 14 (currently in progress): `npm run lint`, `npm run typecheck`,
-      `npm run test` (61 tests, all passing — note: the default `forks`
+- [x] Step 14: `npm run lint`, `npm run typecheck`,
+      `npm run test` (61 tests at the time, now 67 after the PR review
+      fixes below, all passing — note: the default `forks`
       vitest pool is extremely slow to spawn workers in this sandboxed dev
       environment specifically, `--pool=threads` runs the same suite in
       ~1.5s; this looks like a sandbox/antivirus artifact, not a code
       issue, and was left as-is in `vitest.config.ts`), `npm run build` all
       green from repo root; `docker build -f docker/Dockerfile.core-service .`
       running to confirm the container still builds.
+
+## PR review fixes (before merge)
+
+- [x] Serialize `ScaleClient.readStableWeight()` reads (internal promise
+      queue in `tcp-client.ts`) — two concurrent entrance/exit webhooks
+      sharing one scale client could otherwise both resolve from the same
+      incoming stable frame.
+- [x] `loadScaleConfig` now throws on a malformed `SCALE_*` env var
+      (non-integer, zero/negative, or empty string) instead of silently
+      coercing to `0`/`NaN` via `Number()`.
+- [x] TCP client: re-attach a no-op `'error'` listener during `teardown()`
+      (after `removeAllListeners()`, before `destroy()`) to avoid an
+      uncaught-exception crash; enabled `setKeepAlive` so a silent
+      half-open disconnect gets detected/reconnected instead of hanging
+      every future read forever; tear the connection down on a stability
+      timeout so a late frame can't answer a later, unrelated read.
+- [x] Added tests for all of the above (`config.test.ts`,
+      `tcp-client.test.ts`) and hardened `mock-scale-server.ts` with a
+      `connectionCount`/`waitForConnection(atLeast)` API plus an `'error'`
+      listener on server-side sockets, needed to test the reconnect fix
+      deterministically. 67 tests total, all green; lint/typecheck/build
+      re-verified.
 
 Delete this plan file once this work is merged (per `CLAUDE.md`).

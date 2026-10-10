@@ -2,10 +2,11 @@ import net from 'node:net';
 
 export interface MockScaleServer {
   readonly port: number;
+  readonly connectionCount: number;
   /** Writes a raw line (newline appended) to every currently connected client. */
   send(line: string): void;
-  /** Resolves once the first client has connected, so tests don't rely on a timing guess. */
-  waitForConnection(): Promise<void>;
+  /** Resolves once at least `atLeast` clients have connected (default 1), without relying on a timing guess. */
+  waitForConnection(atLeast?: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -17,15 +18,26 @@ export interface MockScaleServer {
 export function startMockScaleServer(): Promise<MockScaleServer> {
   return new Promise((resolve, reject) => {
     const clients = new Set<net.Socket>();
-    let resolveConnected: (() => void) | undefined;
-    const connectedPromise = new Promise<void>((res) => {
-      resolveConnected = res;
-    });
+    let connectionCount = 0;
+    const pendingWaiters: Array<{ atLeast: number; resolve: () => void }> = [];
+
+    function notifyWaiters(): void {
+      for (const waiter of pendingWaiters.slice()) {
+        if (connectionCount < waiter.atLeast) continue;
+        const index = pendingWaiters.indexOf(waiter);
+        if (index !== -1) pendingWaiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
 
     const server = net.createServer((socket) => {
       clients.add(socket);
-      resolveConnected?.();
+      connectionCount += 1;
+      notifyWaiters();
       socket.on('close', () => clients.delete(socket));
+      // A client can disconnect mid-write (e.g. a test forcing a reconnect);
+      // an 'error' event with zero listeners would crash the process.
+      socket.on('error', () => clients.delete(socket));
     });
 
     server.once('error', reject);
@@ -39,11 +51,17 @@ export function startMockScaleServer(): Promise<MockScaleServer> {
 
       resolve({
         port: address.port,
+        get connectionCount() {
+          return connectionCount;
+        },
         send(line) {
           for (const client of clients) client.write(`${line}\n`);
         },
-        waitForConnection() {
-          return connectedPromise;
+        waitForConnection(atLeast = 1) {
+          if (connectionCount >= atLeast) return Promise.resolve();
+          return new Promise((res) => {
+            pendingWaiters.push({ atLeast, resolve: res });
+          });
         },
         close() {
           return new Promise<void>((res) => {

@@ -98,4 +98,45 @@ describe('createTcpScaleClient', () => {
     server.send('ST,8000');
     await expect(secondRead).resolves.toEqual({ weightKg: 8000, weightCaptureFailed: false });
   });
+
+  it('serializes concurrent reads so each gets its own stable frame', async () => {
+    server = await startMockScaleServer();
+    client = createTcpScaleClient({
+      host: '127.0.0.1',
+      port: server.port,
+      stabilityTimeoutMs: 1000,
+      createParser: createPlaceholderFrameParser,
+    });
+
+    const firstRead = client.readStableWeight();
+    const secondRead = client.readStableWeight();
+
+    await server.waitForConnection();
+    server.send('ST,20000');
+    await expect(firstRead).resolves.toEqual({ weightKg: 20000, weightCaptureFailed: false });
+
+    server.send('ST,8000');
+    await expect(secondRead).resolves.toEqual({ weightKg: 8000, weightCaptureFailed: false });
+  });
+
+  it('reconnects after a stability timeout instead of reusing the stale connection', async () => {
+    server = await startMockScaleServer();
+    client = createTcpScaleClient({
+      host: '127.0.0.1',
+      port: server.port,
+      stabilityTimeoutMs: 300,
+      createParser: createPlaceholderFrameParser,
+    });
+
+    const firstRead = client.readStableWeight();
+    await server.waitForConnection();
+    await expect(firstRead).resolves.toEqual({ weightKg: null, weightCaptureFailed: true });
+
+    const secondRead = client.readStableWeight();
+    await server.waitForConnection(2);
+    server.send('ST,12345');
+
+    await expect(secondRead).resolves.toEqual({ weightKg: 12345, weightCaptureFailed: false });
+    expect(server.connectionCount).toBe(2);
+  });
 });
