@@ -1,4 +1,6 @@
-# Tare Weight Ticket System — Development Plan
+# EixoLink — Tare Weight Ticket System — Development Plan
+
+Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
 Status: **Approved — Phases 0–1 complete (merged in PR #1); Phase 2 not started.**
 Created: 2026-09-29

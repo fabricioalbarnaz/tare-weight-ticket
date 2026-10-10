@@ -1,4 +1,7 @@
-# Tare Weight Ticket
+# EixoLink
+
+EixoLink is the product name; the repository and packages keep the technical
+name `tare-weight-ticket` / `@tare/*`.
 
 Fully automatic truck weighbridge ("tare weight") system. One installation
 runs independently per physical scale/PC: an entrance camera and an exit

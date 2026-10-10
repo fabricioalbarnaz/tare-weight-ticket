@@ -46,6 +46,10 @@ weight, and net weight. An Admin UI exists only for manual correction when
 the automatic flow fails (misread plate, hardware timeout, etc.) — the
 system must otherwise require zero human interaction.
 
+The product name is **EixoLink**. Use it in docs and user-facing text (the
+printed ticket and the Admin UI, when they exist), but don't rename the
+repo, the `@tare/*` packages, file paths, or Docker images to match.
+
 ## Decided architecture (see the plan doc for full rationale)
 
 - **Stack**: Node.js/TypeScript, Fastify API, SQLite via Drizzle ORM,
