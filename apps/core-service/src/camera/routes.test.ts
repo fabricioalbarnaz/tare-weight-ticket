@@ -8,6 +8,8 @@ import { buildApp } from '../app.js';
 import { createDb, type Db } from '../db/client.js';
 import { createTicketRepository, type TicketRepository } from '../tickets/repository.js';
 import type { ScaleClient, ScaleReadResult } from '../scale/types.js';
+import type { DriverSignalAdapter, DriverSignalDirection } from '../driver-signal/types.js';
+import type { PrintClient } from '../printing/print-client.js';
 
 let dbPath: string;
 let sqlite: ReturnType<typeof createDb>['sqlite'];
@@ -15,6 +17,8 @@ let db: Db;
 let repo: TicketRepository;
 let app: FastifyInstance;
 let nextScaleReading: ScaleReadResult;
+let driverSignalCalls: DriverSignalDirection[];
+let printCalls: number;
 
 function createFakeScaleClient(): ScaleClient {
   return {
@@ -25,6 +29,23 @@ function createFakeScaleClient(): ScaleClient {
   };
 }
 
+function createFakeDriverSignalAdapter(): DriverSignalAdapter {
+  return {
+    async signalDriver(direction) {
+      driverSignalCalls.push(direction);
+    },
+  };
+}
+
+function createFakePrintClient(): PrintClient {
+  return {
+    async printTicket() {
+      printCalls += 1;
+      return { success: true };
+    },
+  };
+}
+
 beforeEach(() => {
   dbPath = path.join(os.tmpdir(), `tare-routes-test-${randomUUID()}.sqlite`);
   const created = createDb(dbPath);
@@ -32,7 +53,14 @@ beforeEach(() => {
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
   nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
-  app = buildApp({ db, scaleClient: createFakeScaleClient() });
+  driverSignalCalls = [];
+  printCalls = 0;
+  app = buildApp({
+    db,
+    scaleClient: createFakeScaleClient(),
+    driverSignalAdapter: createFakeDriverSignalAdapter(),
+    printClient: createFakePrintClient(),
+  });
 });
 
 afterEach(() => {
@@ -64,6 +92,7 @@ describe('POST /webhooks/camera/entrance', () => {
     const ticket = repo.findOpenByPlate('ABC1234');
     expect(ticket?.entryWeightKg).toBe(20000);
     expect(ticket?.status).toBe('OPEN');
+    expect(driverSignalCalls).toEqual(['in']);
   });
 
   it('overwrites the entry on a retrigger for the same open ticket', async () => {
@@ -93,6 +122,8 @@ describe('POST /webhooks/camera/entrance', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+    // The truck was still on the scale — it must still get the move-on signal.
+    expect(driverSignalCalls).toEqual(['in']);
   });
 
   it('rejects a payload missing cameraId', async () => {
@@ -114,6 +145,9 @@ describe('POST /webhooks/camera/exit', () => {
     const ticket = repo.findById(exit.json().ticketId);
     expect(ticket?.status).toBe('CLOSED');
     expect(ticket?.netWeightKg).toBe(12000);
+    expect(driverSignalCalls).toEqual(['in', 'out']);
+    expect(printCalls).toBe(1);
+    expect(ticket?.printedAt).not.toBeNull();
   });
 
   it('flags an anomaly when there is no open ticket for the plate', async () => {
@@ -122,6 +156,7 @@ describe('POST /webhooks/camera/exit', () => {
     expect(response.json().kind).toBe('anomaly_flagged');
     const ticket = repo.findById(response.json().ticketId);
     expect(ticket?.status).toBe('ANOMALY');
+    expect(printCalls).toBe(0);
   });
 
   it('records exitCaptureFailed when the scale times out', async () => {

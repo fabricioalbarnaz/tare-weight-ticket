@@ -1,3 +1,5 @@
+import { parsePositiveInt } from '../config/env.js';
+
 export interface ScaleConfig {
   host: string;
   port: number;
@@ -16,14 +18,4 @@ export function loadScaleConfig(env: NodeJS.ProcessEnv = process.env): ScaleConf
     ),
     connectTimeoutMs: parsePositiveInt('SCALE_CONNECT_TIMEOUT_MS', env.SCALE_CONNECT_TIMEOUT_MS, 5000),
   };
-}
-
-function parsePositiveInt(name: string, value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${name}: "${value}" is not a positive integer`);
-  }
-  return parsed;
 }

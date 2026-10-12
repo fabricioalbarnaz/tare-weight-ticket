@@ -41,6 +41,7 @@ export interface TicketRepository {
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
+  markPrinted(ticketId: number, printedAt: Date): Ticket;
   flagAnomaly(input: FlagAnomalyInput): Ticket;
   appendAuditLog(ticketId: number, actor: string, action: string, payload?: unknown): void;
   recordRawEvent(source: RawEventSource, rawPayload: unknown, linkedTicketId?: number): void;
@@ -146,6 +147,20 @@ export function createTicketRepository(db: Db): TicketRepository {
         throw new Error(`Cannot close ticket ${ticketId}: not found or not OPEN`);
       }
       return closed;
+    },
+
+    markPrinted(ticketId, printedAt) {
+      const updated = db
+        .update(tickets)
+        .set({ printedAt, updatedAt: new Date() })
+        .where(and(eq(tickets.id, ticketId), eq(tickets.status, 'CLOSED')))
+        .returning()
+        .get();
+
+      if (!updated) {
+        throw new Error(`Cannot mark ticket ${ticketId} as printed: not found or not CLOSED`);
+      }
+      return updated;
     },
 
     flagAnomaly(input) {

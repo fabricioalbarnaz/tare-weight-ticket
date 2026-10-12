@@ -1,6 +1,6 @@
 # Tare Weight Ticket System — Development Plan
 
-Status: **Approved — Phases 0–1 complete (merged in PR #1); Phases 2–3 implemented, pending review/PR.**
+Status: **Approved — Phases 0–1 complete (merged in PR #1); Phases 2–3 committed with an open PR; Phases 4–5 implemented, pending review/PR.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -437,3 +437,48 @@ the per-feature working plan is deleted after merge, per `CLAUDE.md`):
   (e.g. the indicator loses power without a clean TCP close) is eventually
   detected and reconnected, instead of leaving every future read timing
   out forever until the service is restarted.
+
+Decisions and lessons from Phases 4–5:
+
+- **Driver signal fires right after the scale read, before the session
+  service is even called** — for *every* outcome (ticket opened/
+  retriggered/closed, anomaly, capture-failed, even a currently-unreadable
+  plate once the scale read already happened). The truck is physically on
+  the scale regardless of what the software decides about the ticket, so
+  it must never be left stuck there (same principle as the §5 timeout
+  rule, generalized to the whole entrance/exit flow).
+- **The print bridge implements the master plan's documented *fallback*
+  approach** (native process, localhost HTTP, outside Docker), not
+  `usbipd-win` — that spike (§7 risk #1) hasn't happened and there's no
+  USB printer hardware to test against. Per the plan's own wording for
+  that fallback ("the Core Service calls it with ticket data, and it
+  [the bridge] sends raw ESC/POS bytes to the printer"), ESC/POS
+  generation lives in `apps/print-bridge`, not `core-service` —
+  core-service only sends plain ticket data over the shared
+  `PrintTicketRequest` contract. The bridge's `PrinterTransport` is
+  pluggable; the only implementation today writes jobs to a file, since
+  there's no printer to send real bytes to yet.
+- **`packages/shared` got its first real consumer** (the print wire
+  contract) in this phase, which surfaced a latent build-order problem:
+  the root `package.json`'s `workspaces` array had `apps/*` before
+  `packages/*`, so `npm run build`/`typecheck --workspaces` built
+  `core-service`/`print-bridge` *before* `@tare/shared`, which would fail
+  once those apps actually import shared types (previously harmless
+  since nothing used `@tare/shared`). Fixed by reordering the array;
+  verified empirically that npm's `--workspaces` execution order follows
+  that array. The Dockerfile was never affected — it already built
+  `@tare/shared` explicitly first.
+- **`printed_at` (Phase 1 schema) is the single-print guarantee**:
+  `PrintService.printIfNeeded` no-ops if it's already set, and only the
+  explicit `POST /tickets/:id/reprint` (manual reprint, ahead of the
+  Phase 6 Admin UI button that will call it) bypasses that check. Both
+  paths share one `print()` helper so the DB write (mark printed +
+  append `ticket_audit_log`) happens in one transaction, distinguishing
+  `ticket_printed` (automatic) from `ticket_reprinted` (manual) by actor.
+- **Printing failures never throw** — `PrintClient.printTicket` always
+  resolves (`{ success: false, error }` on any network/HTTP failure), and
+  the reprint route returns 200 with `{ success: false }` for business-
+  level failures (ticket not found, not yet `CLOSED`, bridge down),
+  matching the camera webhook routes' convention of only using HTTP error
+  codes for malformed requests. A print failure is never a reason to fail
+  ticket processing — the system has no human in the loop by design.
