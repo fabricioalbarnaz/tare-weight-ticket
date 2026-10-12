@@ -1,0 +1,182 @@
+{
+  "common": {
+    "loading": "Loading…",
+    "yes": "Yes",
+    "no": "No",
+    "cancel": "Cancel",
+    "backToDashboard": "← Back to dashboard"
+  },
+  "language": {
+    "label": "Language",
+    "pt-BR": "Português",
+    "en": "English"
+  },
+  "nav": {
+    "appName": "EixoLink",
+    "dashboard": "Dashboard",
+    "history": "History",
+    "unresolvedEvents": "Unresolved Events",
+    "hardwareStatus": "Hardware Status",
+    "logout": "Log out"
+  },
+  "login": {
+    "title": "Admin sign in",
+    "subtitle": "EixoLink — local admin access",
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "invalidCredentials": "Invalid username or password.",
+    "genericError": "Could not sign in. Please try again.",
+    "validation": {
+      "usernameRequired": "Username is required",
+      "passwordRequired": "Password is required"
+    }
+  },
+  "dashboard": {
+    "title": "Today's tickets",
+    "newTicket": "New ticket",
+    "loadingTickets": "Loading tickets…",
+    "loadError": "Could not load tickets."
+  },
+  "history": {
+    "title": "Ticket history",
+    "searchPlaceholder": "Search all history by plate…",
+    "pageOf": "Page {{page}} of {{totalPages}} ({{total}} tickets)",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "hardwareStatus": {
+    "title": "Hardware status",
+    "loadError": "Could not load hardware status.",
+    "lastSeen": "Last seen: {{value}}",
+    "reachable": "Reachable",
+    "unreachable": "Unreachable",
+    "components": {
+      "cameraEntrance": "Entrance camera",
+      "cameraExit": "Exit camera",
+      "scale": "Scale (Digi-Tron Isis New)",
+      "printBridge": "Print bridge",
+      "relay": "Driver signal relay"
+    },
+    "badge": {
+      "title": "Hardware status",
+      "allOk": "All hardware OK",
+      "someDown": "{{count}} component(s) unreachable"
+    }
+  },
+  "createTicket": {
+    "heading": "Create ticket manually",
+    "description": "Use this when the automatic flow failed (misread plate, camera event with no matching ticket) and the entry needs to be recorded by hand."
+  },
+  "ticketDetail": {
+    "loading": "Loading ticket…",
+    "notFound": "Ticket not found.",
+    "ticketHeading": "Ticket #{{number}} —",
+    "entry": "Entry",
+    "entryWeight": "Entry weight",
+    "exit": "Exit",
+    "exitWeight": "Exit weight",
+    "netWeight": "Net weight",
+    "printedAt": "Printed at",
+    "createdByAdmin": "Created by admin",
+    "auditTrail": "Audit trail"
+  },
+  "unresolvedEvents": {
+    "title": "Unresolved camera events",
+    "description": "Camera events the automatic flow could not turn into a ticket (unreadable plate). Create the matching ticket by hand once you know which truck it was.",
+    "loadError": "Could not load unresolved events.",
+    "empty": "No unresolved events. 🎉",
+    "camera": "Camera: {{cameraId}}",
+    "rawPlate": " · raw plate: \"{{plate}}\"",
+    "createTicket": "Create ticket",
+    "sources": {
+      "camera_entrance": "Entrance camera",
+      "camera_exit": "Exit camera",
+      "scale": "Scale"
+    }
+  },
+  "auditLog": {
+    "empty": "No audit log entries yet.",
+    "by": "by {{actor}}",
+    "actions": {
+      "entry_captured": "Entry captured",
+      "entry_capture_failed": "Entry capture failed",
+      "entry_overwritten": "Entry overwritten (re-trigger)",
+      "exit_captured": "Exit captured",
+      "exit_capture_failed": "Exit capture failed",
+      "anomaly_flagged": "Flagged as anomaly",
+      "manual_edit": "Manually edited",
+      "manual_create": "Manually created",
+      "reprint": "Reprinted"
+    }
+  },
+  "forms": {
+    "create": {
+      "plate": "Plate",
+      "entryDateTime": "Entry date & time",
+      "entryWeight": "Entry weight (kg)",
+      "reason": "Reason",
+      "reasonPlaceholder": "e.g. entrance camera failed to read the plate, created from the unresolved event",
+      "submit": "Create ticket",
+      "submitting": "Creating…",
+      "error": "Could not create the ticket. Please try again.",
+      "validation": {
+        "plate": "Enter the plate",
+        "dateTimeRequired": "Date and time are required",
+        "weightPositive": "Weight must be greater than 0",
+        "reason": "Explain why this ticket is being created manually (at least 5 characters)"
+      }
+    },
+    "editLeg": {
+      "ariaLabel": "Edit {{leg}} weight",
+      "heading": "Edit {{leg}}",
+      "legName": {
+        "entry": "entry",
+        "exit": "exit"
+      },
+      "dateTime": "Date & time",
+      "weight": "Weight (kg)",
+      "reason": "Reason for this correction",
+      "reasonPlaceholder": "e.g. camera misread plate, weight manually re-entered from printed receipt",
+      "submit": "Save correction",
+      "submitting": "Saving…",
+      "success": "Saved. See the audit trail below.",
+      "error": "Could not save. Please try again.",
+      "validation": {
+        "dateTimeRequired": "Date and time are required",
+        "weightPositive": "Weight must be greater than 0",
+        "reason": "Explain the correction (at least 5 characters)"
+      }
+    },
+    "reprint": {
+      "button": "Reprint ticket",
+      "confirm": "Reprint #{{number}}?",
+      "confirmButton": "Confirm",
+      "printing": "Printing…",
+      "cancel": "Cancel",
+      "error": "Reprint failed."
+    }
+  },
+  "tickets": {
+    "status": {
+      "ALL": "All",
+      "OPEN": "Open",
+      "CLOSED": "Closed",
+      "ANOMALY": "Anomaly",
+      "NEEDS_ATTENTION": "Needs attention"
+    },
+    "table": {
+      "ticketNumber": "Ticket #",
+      "plate": "Plate",
+      "status": "Status",
+      "entry": "Entry",
+      "exit": "Exit",
+      "netWeight": "Net weight",
+      "empty": "No tickets found."
+    },
+    "filters": {
+      "searchPlaceholder": "Search by plate…"
+    }
+  }
+}
