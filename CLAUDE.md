@@ -15,18 +15,56 @@ plan's §11 "Implementation notes from completed phases" for the design
 decisions made along the way (most notably: `entryAt` is nullable to
 support `ANOMALY` tickets created from an exit-without-entrance event,
 scale timeouts are handled by the same entrance/exit handlers rather than a
-separate code path, and each handler runs inside one SQLite transaction). `core-service`
-now has: a Drizzle/SQLite schema and migrations (`src/db/`), a ticket
-repository (`src/tickets/repository.ts`), and a session service
+separate code path, and each handler runs inside one SQLite transaction).
+`core-service` has a Drizzle/SQLite schema and migrations (`src/db/`), a
+ticket repository (`src/tickets/repository.ts`), and a session service
 (`src/tickets/session-service.ts`) implementing every business rule from
 the master plan's §5, all backed by real temp-file SQLite DBs in tests (no
-mocking the DB). `npm run lint`, `npm run typecheck`, `npm run test` (35
-tests), and `npm run build` all pass from the repo root under Node 24.
-Nothing is wired into HTTP routes yet — that starts in Phase 3.
+mocking the DB).
 
-Next: Phase 2 (scale integration), not started yet. The Digi-Tron Isis New
-protocol manual and hardware access are not available yet, so Phase 2
-starts with a pluggable parser + mock TCP scale (see master plan §7.2).
+Phases 2–3 (scale integration + camera integration) are committed and a
+PR is open — see the master plan's §11 for the resulting design
+decisions. In short: `src/scale/` has a TCP client with stability-wait
+logic against a placeholder frame parser (real Isis New protocol still
+pending vendor manual, master plan §7.2) and a mock TCP scale server for
+tests; `src/camera/` has the entrance/exit webhook routes, a generic
+payload schema + normalization layer (real camera vendor still pending,
+master plan §7.3), wired into the session service. `buildApp()` takes
+`{ db, scaleClient, ... }`; `server.ts` builds the real SQLite db
+(`DB_PATH`) and TCP scale client (`SCALE_*` env vars) for production use.
+PR review also caught and fixed: a shared-scale-client race between
+concurrent entrance/exit webhooks (reads are now serialized), a
+Dockerfile missing the `drizzle/` migrations folder in the runtime stage,
+and a couple of TCP-client robustness gaps (crash on teardown, no
+reconnect after a stability timeout).
+
+Phases 4–5 (driver signal + print bridge) are implemented in this working
+tree, pending review and a PR from the user — see
+`docs/plans/2026-10-10-phase-4-5-driver-signal-print-bridge.md` for the
+step-by-step breakdown and the master plan's §11 for the resulting design
+decisions. In short: `src/driver-signal/` has a generic HTTP-relay
+adapter (real relay hardware still unchosen, master plan §7.4), fired
+right after every scale read (success or capture-failed) so the truck is
+never left stuck on the scale, regardless of the ticket outcome. A new
+workspace `apps/print-bridge` (native, **not** containerized — USB access
+from Docker on Windows is unreliable, master plan §7.1) exposes
+`POST /print`: it builds ESC/POS bytes from the ticket fields and sends
+them through a pluggable `PrinterTransport` (currently a placeholder that
+writes jobs to a file — no printer hardware or `usbipd-win` spike yet).
+`core-service/src/printing/` has the HTTP client to that bridge, a
+`PrintService` wrapping it with the repository (single-print guarantee
+via `printed_at`, manual reprint via `POST /tickets/:id/reprint`), wired
+into the exit webhook route right after a ticket closes. The wire
+contract between the two apps (`PrintTicketRequest`/`PrintTicketResponse`)
+lives in `packages/shared` — its first real use, which required
+reordering the root `package.json` workspaces array (`packages/*` before
+`apps/*`) so `@tare/shared` builds before its consumers. `npm run lint`,
+`npm run typecheck`, `npm run test` (104 core-service + 10 print-bridge
+tests), and `npm run build` all pass from the repo root under Node 24.
+
+Next: Phase 6 (Admin UI), not started in this repo — note a sibling
+worktree/branch is scaffolding an admin UI frontend independently; check
+with the user before assuming scope there.
 
 Before doing any work here, read the latest file in `docs/plans/` (currently
 `docs/plans/2026-09-29-tare-weight-ticket-plan.md`) in full — it is the

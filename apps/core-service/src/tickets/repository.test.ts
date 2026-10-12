@@ -220,6 +220,39 @@ describe('TicketRepository', () => {
     expect(closed.netWeightKg).toBeNull();
   });
 
+  it('marks a CLOSED ticket as printed', () => {
+    const created = repo.create({
+      plate: 'PRINT001',
+      entryAt: new Date(),
+      entryWeightKg: 1000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+    repo.close(created.id, {
+      exitAt: new Date(),
+      exitWeightKg: 500,
+      exitCameraId: 'cam-2',
+      exitCaptureFailed: false,
+    });
+
+    const printedAt = new Date('2026-01-01T10:00:00Z');
+    const updated = repo.markPrinted(created.id, printedAt);
+
+    expect(updated.printedAt).toEqual(printedAt);
+  });
+
+  it('refuses to mark a ticket as printed when it is not CLOSED', () => {
+    const created = repo.create({
+      plate: 'PRINT002',
+      entryAt: new Date(),
+      entryWeightKg: 1000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+
+    expect(() => repo.markPrinted(created.id, new Date())).toThrow(/not found or not CLOSED/);
+  });
+
   it('creates an ANOMALY ticket via flagAnomaly with no entry data', () => {
     const ticket = repo.flagAnomaly({
       plate: 'NOENTRY1',

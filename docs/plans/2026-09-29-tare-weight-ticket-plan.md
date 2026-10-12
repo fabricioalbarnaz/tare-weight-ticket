@@ -2,7 +2,7 @@
 
 Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
-Status: **Approved — Phases 0–1 complete (merged in PR #1); Phase 2 not started.**
+Status: **Approved — Phases 0–1 complete (merged in PR #1); Phases 2–3 committed with an open PR; Phases 4–5 implemented, pending review/PR.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -377,3 +377,110 @@ alone (the per-phase working plans were deleted after merge, per
   changed**, not just `npm run build`/`test` on the host. `better-sqlite3`
   needs `python3 make g++` in the Alpine `deps` stage; this only showed up
   in CI because local builds used a prebuilt binary.
+
+Decisions and lessons from Phases 2–3 (not obvious from the code alone;
+the per-feature working plan is deleted after merge, per `CLAUDE.md`):
+
+- **Scale protocol is still a placeholder.** `src/scale/placeholder-frame-parser.ts`
+  implements a made-up ASCII line format (`<ST|US>,<weightKg>`) explicitly
+  documented as NOT the real Digi-Tron Isis New wire format — it exists so
+  `ScaleFrameParser`/`ScaleClient` and the stability-wait logic could be
+  built and tested now (master plan §7.2). Swapping in the real parser once
+  the vendor manual/hardware arrives means writing a new
+  `ScaleFrameParser` implementation and changing one `createParser` call
+  in `server.ts`; nothing else (TCP client, webhook routes, session
+  service) needs to change.
+- **`ScaleClient.readStableWeight()` keeps one persistent TCP connection**
+  open across calls rather than reconnecting per read (an indicator
+  streams continuously; reconnecting per truck would be wasteful and
+  slower). Connection failures and stability timeouts both resolve the
+  same way — `{ weightKg: null, weightCaptureFailed: true }` — matching
+  the master plan §5 rule that a scale hiccup must never block the driver
+  signal. Reconnect/retry *resilience* (vs. just not crashing) is
+  Phase 8 (Hardening) scope, not Phase 2.
+- **Camera payload shape is also a placeholder**, for the same reason as
+  the scale protocol: the real camera model isn't chosen yet (master plan
+  §7.3). `src/camera/payload-schema.ts` + `normalize.ts` isolate the
+  generic `{ plate, cameraId, timestamp }` shape from the routes and
+  session service, so only those two files change once the real vendor
+  payload is known.
+- **Webhook routes return HTTP 200 for every business-level outcome**
+  (`ticket_opened`, `ticket_retriggered`, `ticket_closed`,
+  `anomaly_flagged`, `plate_unreadable`) — only a malformed request body
+  (missing `cameraId`) is a 400. An unreadable plate or an exit-without-
+  entrance anomaly are expected, handled outcomes per master plan §5, not
+  errors.
+- **`buildApp()` now takes `{ db, scaleClient }`** instead of building its
+  own dependencies, so tests can inject a real temp-file SQLite db (same
+  "no mocking the DB" approach as Phase 1) alongside a fake `ScaleClient`.
+  `server.ts` is the only place that builds the real `Db` (from `DB_PATH`)
+  and the real `createTcpScaleClient` (from `SCALE_*` env vars) for
+  production.
+- **`ScaleClient.readStableWeight()` serializes reads** behind an internal
+  promise queue. The scale is one physical resource shared by both the
+  entrance and exit routes; without serialization, two concurrent webhook
+  requests could both be resolved by the same incoming stable frame
+  (PR review feedback). On a stability timeout, the client also tears the
+  connection down (instead of just resolving the pending read), so a frame
+  that settles just after the timeout can never be mistaken for a later,
+  unrelated read — the cost (one extra reconnect) is paid only on the rare
+  timeout path, not on every read.
+- **`loadScaleConfig` rejects malformed `SCALE_*` env vars at startup**
+  (non-integer, zero/negative, or an empty string) instead of letting
+  `Number()` silently coerce them to `0`/`NaN` (PR review feedback) — on a
+  PC installed without a developer nearby, a bad `.env` value should fail
+  loudly on boot, not cause a silent, confusing scale read failure later.
+- **The TCP client re-attaches a no-op `'error'` listener during
+  teardown**, after `removeAllListeners()` and before `destroy()` (PR
+  review feedback): an `'error'` event with zero listeners crashes the
+  Node process, and `removeAllListeners()` would otherwise leave exactly
+  that gap for the remainder of `destroy()`. Keep-alive
+  (`socket.setKeepAlive`) was also added so a silent half-open disconnect
+  (e.g. the indicator loses power without a clean TCP close) is eventually
+  detected and reconnected, instead of leaving every future read timing
+  out forever until the service is restarted.
+
+Decisions and lessons from Phases 4–5:
+
+- **Driver signal fires right after the scale read, before the session
+  service is even called** — for *every* outcome (ticket opened/
+  retriggered/closed, anomaly, capture-failed, even a currently-unreadable
+  plate once the scale read already happened). The truck is physically on
+  the scale regardless of what the software decides about the ticket, so
+  it must never be left stuck there (same principle as the §5 timeout
+  rule, generalized to the whole entrance/exit flow).
+- **The print bridge implements the master plan's documented *fallback*
+  approach** (native process, localhost HTTP, outside Docker), not
+  `usbipd-win` — that spike (§7 risk #1) hasn't happened and there's no
+  USB printer hardware to test against. Per the plan's own wording for
+  that fallback ("the Core Service calls it with ticket data, and it
+  [the bridge] sends raw ESC/POS bytes to the printer"), ESC/POS
+  generation lives in `apps/print-bridge`, not `core-service` —
+  core-service only sends plain ticket data over the shared
+  `PrintTicketRequest` contract. The bridge's `PrinterTransport` is
+  pluggable; the only implementation today writes jobs to a file, since
+  there's no printer to send real bytes to yet.
+- **`packages/shared` got its first real consumer** (the print wire
+  contract) in this phase, which surfaced a latent build-order problem:
+  the root `package.json`'s `workspaces` array had `apps/*` before
+  `packages/*`, so `npm run build`/`typecheck --workspaces` built
+  `core-service`/`print-bridge` *before* `@tare/shared`, which would fail
+  once those apps actually import shared types (previously harmless
+  since nothing used `@tare/shared`). Fixed by reordering the array;
+  verified empirically that npm's `--workspaces` execution order follows
+  that array. The Dockerfile was never affected — it already built
+  `@tare/shared` explicitly first.
+- **`printed_at` (Phase 1 schema) is the single-print guarantee**:
+  `PrintService.printIfNeeded` no-ops if it's already set, and only the
+  explicit `POST /tickets/:id/reprint` (manual reprint, ahead of the
+  Phase 6 Admin UI button that will call it) bypasses that check. Both
+  paths share one `print()` helper so the DB write (mark printed +
+  append `ticket_audit_log`) happens in one transaction, distinguishing
+  `ticket_printed` (automatic) from `ticket_reprinted` (manual) by actor.
+- **Printing failures never throw** — `PrintClient.printTicket` always
+  resolves (`{ success: false, error }` on any network/HTTP failure), and
+  the reprint route returns 200 with `{ success: false }` for business-
+  level failures (ticket not found, not yet `CLOSED`, bridge down),
+  matching the camera webhook routes' convention of only using HTTP error
+  codes for malformed requests. A print failure is never a reason to fail
+  ticket processing — the system has no human in the loop by design.
