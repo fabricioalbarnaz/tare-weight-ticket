@@ -1,13 +1,15 @@
+import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { LanguageSwitcher } from '../LanguageSwitcher';
 import { HardwareStatusBadge } from './HardwareStatusBadge';
 
 const NAV_LINKS = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/history', label: 'History' },
-  { to: '/unresolved-events', label: 'Unresolved Events' },
-  { to: '/status', label: 'Hardware Status' },
-];
+  { to: '/', labelKey: 'nav.dashboard' },
+  { to: '/history', labelKey: 'nav.history' },
+  { to: '/unresolved-events', labelKey: 'nav.unresolvedEvents' },
+  { to: '/status', labelKey: 'nav.hardwareStatus' },
+] as const;
 
 function linkClass(isActive: boolean) {
   return `rounded-md px-3 py-2 text-sm font-medium ${
@@ -16,6 +18,7 @@ function linkClass(isActive: boolean) {
 }
 
 export function AppShell() {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
 
   return (
@@ -23,7 +26,7 @@ export function AppShell() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-6">
-            <span className="text-lg font-semibold text-slate-900">Tare Weight Ticket</span>
+            <span className="text-lg font-semibold text-slate-900">{t('nav.appName')}</span>
             <nav className="flex gap-1">
               {NAV_LINKS.map((link) => (
                 <NavLink
@@ -32,12 +35,13 @@ export function AppShell() {
                   end={link.to === '/'}
                   className={({ isActive }) => linkClass(isActive)}
                 >
-                  {link.label}
+                  {t(link.labelKey)}
                 </NavLink>
               ))}
             </nav>
           </div>
           <div className="flex items-center gap-4">
+            <LanguageSwitcher />
             <HardwareStatusBadge />
             <span className="text-sm text-slate-500">{user?.username}</span>
             <button
@@ -45,7 +49,7 @@ export function AppShell() {
               onClick={logout}
               className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
             >
-              Log out
+              {t('nav.logout')}
             </button>
           </div>
         </div>

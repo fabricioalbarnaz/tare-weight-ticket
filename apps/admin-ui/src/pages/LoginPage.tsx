@@ -1,17 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import type { TFunction } from 'i18next';
 import { useForm } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, type Location } from 'react-router-dom';
 import { z } from 'zod';
 import { useAuth } from '../auth/AuthContext';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
-const schema = z.object({
-  username: z.string().min(1, 'Username is required'),
-  password: z.string().min(1, 'Password is required'),
-});
+function createLoginSchema(t: TFunction) {
+  return z.object({
+    username: z.string().min(1, t('login.validation.usernameRequired')),
+    password: z.string().min(1, t('login.validation.passwordRequired')),
+  });
+}
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createLoginSchema>>;
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const { user, login, loginError, isLoggingIn } = useAuth();
   const location = useLocation();
 
@@ -19,7 +25,7 @@ export function LoginPage() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<FormValues>({ resolver: zodResolver(createLoginSchema(t)) });
 
   if (user) {
     const from = (location.state as { from?: Location } | null)?.from;
@@ -29,18 +35,21 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
       <form
         onSubmit={handleSubmit((values) => login(values))}
         className="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
       >
         <div>
-          <h1 className="text-lg font-semibold text-slate-900">Admin sign in</h1>
-          <p className="text-sm text-slate-500">Tare Weight Ticket — local admin access</p>
+          <h1 className="text-lg font-semibold text-slate-900">{t('login.title')}</h1>
+          <p className="text-sm text-slate-500">{t('login.subtitle')}</p>
         </div>
 
         <div>
           <label className="block text-xs font-medium text-slate-600" htmlFor="username">
-            Username
+            {t('login.username')}
           </label>
           <input
             id="username"
@@ -55,7 +64,7 @@ export function LoginPage() {
 
         <div>
           <label className="block text-xs font-medium text-slate-600" htmlFor="password">
-            Password
+            {t('login.password')}
           </label>
           <input
             id="password"
@@ -76,7 +85,7 @@ export function LoginPage() {
           disabled={isLoggingIn}
           className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {isLoggingIn ? 'Signing in…' : 'Sign in'}
+          {isLoggingIn ? t('login.signingIn') : t('login.signIn')}
         </button>
       </form>
     </div>

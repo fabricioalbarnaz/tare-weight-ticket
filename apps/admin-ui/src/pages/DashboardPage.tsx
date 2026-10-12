@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { TicketFilters, type TicketFiltersValue } from '../components/tickets/TicketFilters';
@@ -12,6 +13,7 @@ function startOfTodayIso(): string {
 }
 
 export function DashboardPage() {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<TicketFiltersValue>({ status: 'ALL', search: '' });
 
   const { data, isLoading, isError } = useQuery({
@@ -28,19 +30,19 @@ export function DashboardPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">Today&apos;s tickets</h1>
+        <h1 className="text-xl font-semibold text-slate-900">{t('dashboard.title')}</h1>
         <Link
           to="/tickets/new"
           className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
         >
-          New ticket
+          {t('dashboard.newTicket')}
         </Link>
       </div>
 
       <TicketFilters value={filters} onChange={setFilters} />
 
-      {isLoading && <p className="text-sm text-slate-500">Loading tickets…</p>}
-      {isError && <p className="text-sm text-red-600">Could not load tickets.</p>}
+      {isLoading && <p className="text-sm text-slate-500">{t('dashboard.loadingTickets')}</p>}
+      {isError && <p className="text-sm text-red-600">{t('dashboard.loadError')}</p>}
       {data && <TicketTable tickets={data.items} />}
     </div>
   );

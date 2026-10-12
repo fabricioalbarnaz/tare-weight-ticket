@@ -19,9 +19,11 @@
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
     "@tanstack/react-query": "^5.104.1",
+    "i18next": "^26.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-hook-form": "^7.89.0",
+    "react-i18next": "^17.0.16",
     "react-router-dom": "^7.18.4",
     "zod": "^4.6.5"
   },

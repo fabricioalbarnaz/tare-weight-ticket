@@ -1,10 +1,11 @@
+import { useTranslation } from 'react-i18next';
 import type { TicketStatus } from '../../api/types';
 
-const STATUS_OPTIONS: Array<{ label: string; value: TicketStatus | 'ALL' }> = [
-  { label: 'All', value: 'ALL' },
-  { label: 'Open', value: 'OPEN' },
-  { label: 'Closed', value: 'CLOSED' },
-  { label: 'Anomaly', value: 'ANOMALY' },
+const STATUS_OPTIONS: Array<{ labelKey: string; value: TicketStatus | 'ALL' }> = [
+  { labelKey: 'tickets.status.ALL', value: 'ALL' },
+  { labelKey: 'tickets.status.OPEN', value: 'OPEN' },
+  { labelKey: 'tickets.status.CLOSED', value: 'CLOSED' },
+  { labelKey: 'tickets.status.ANOMALY', value: 'ANOMALY' },
 ];
 
 export interface TicketFiltersValue {
@@ -15,12 +16,14 @@ export interface TicketFiltersValue {
 export function TicketFilters({
   value,
   onChange,
-  searchPlaceholder = 'Search by plate…',
+  searchPlaceholder,
 }: {
   value: TicketFiltersValue;
   onChange: (value: TicketFiltersValue) => void;
   searchPlaceholder?: string;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="mb-4 flex flex-wrap items-center gap-3">
       <div className="flex gap-1">
@@ -35,7 +38,7 @@ export function TicketFilters({
                 : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
             }`}
           >
-            {option.label}
+            {t(option.labelKey)}
           </button>
         ))}
       </div>
@@ -43,7 +46,7 @@ export function TicketFilters({
         type="search"
         value={value.search}
         onChange={(e) => onChange({ ...value, search: e.target.value })}
-        placeholder={searchPlaceholder}
+        placeholder={searchPlaceholder ?? t('tickets.filters.searchPlaceholder')}
         className="ml-auto rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none"
       />
     </div>

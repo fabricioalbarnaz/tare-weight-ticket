@@ -123,6 +123,23 @@ schema minus DB-only concerns).
     files that intentionally export a hook/helper alongside a component),
     typecheck, test (10/10), and build are all green.
 
+## i18n addendum (added before merge, same uncommitted branch)
+
+The UI was initially built with hardcoded English strings. Before review,
+the user asked for proper i18n: Portuguese (pt-BR, default/fallback) and
+English, via `react-i18next`. Added `src/i18n/config.ts` +
+`src/i18n/locales/{en,pt-BR}.json`, a `LanguageSwitcher` component (header
++ login page, choice persisted to `localStorage`), migrated every
+page/component/form to `useTranslation()`'s `t()`, converted the zod
+validation schemas (login, create-ticket, edit-leg) to factory functions
+taking `t` so validation messages translate too, and made
+`lib/datetime.ts`'s `formatDateTime`/`formatWeight` accept an explicit
+`locale` param (`i18n.language`) so date/number formatting follows the
+in-app language instead of just the OS locale. Tests: `setup-tests.ts`
+fixes the test locale to `en` (seeded 1:1 from the original hardcoded
+copy) so all 10 pre-existing component tests kept working unchanged; added
+one new test exercising the actual pt-BR/en toggle end-to-end.
+
 ## Notes from this run
 
 - Two real bugs were found and fixed while writing the component tests:

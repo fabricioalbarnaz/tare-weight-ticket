@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Ticket } from '../../api/types';
 
 const STYLES: Record<string, string> = {
@@ -12,12 +13,12 @@ export function needsAttention(ticket: Ticket): boolean {
 }
 
 export function StatusBadge({ ticket }: { ticket: Ticket }) {
+  const { t } = useTranslation();
   const key = needsAttention(ticket) ? 'NEEDS_ATTENTION' : ticket.status;
-  const label = key === 'NEEDS_ATTENTION' ? 'Needs attention' : ticket.status;
 
   return (
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[key]}`}>
-      {label}
+      {t(`tickets.status.${key}`)}
     </span>
   );
 }

@@ -11,12 +11,12 @@ export function fromDateTimeInputValue(value: string): string {
   return new Date(value).toISOString();
 }
 
-export function formatDateTime(iso: string | null): string {
+export function formatDateTime(iso: string | null, locale?: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString(locale);
 }
 
-export function formatWeight(kg: number | null): string {
+export function formatWeight(kg: number | null, locale?: string): string {
   if (kg === null) return '—';
-  return `${kg.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
+  return `${kg.toLocaleString(locale, { maximumFractionDigits: 1 })} kg`;
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError } from '../api/client';
 import type { CurrentUser, LoginPayload } from '../api/types';
 
@@ -15,6 +16,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -41,8 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onError: (error: unknown) => {
       setLoginError(
         error instanceof ApiError && error.status === 401
-          ? 'Invalid username or password.'
-          : 'Could not sign in. Please try again.',
+          ? t('login.invalidCredentials')
+          : t('login.genericError'),
       );
     },
   });

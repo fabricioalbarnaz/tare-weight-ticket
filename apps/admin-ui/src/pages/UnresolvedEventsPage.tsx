@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
+import type { RawEventSource } from '../api/types';
 import { formatDateTime } from '../lib/datetime';
 
 function guessPlate(rawPayload: unknown): string {
@@ -19,13 +21,8 @@ function guessCameraId(rawPayload: unknown): string {
   return '—';
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  camera_entrance: 'Entrance camera',
-  camera_exit: 'Exit camera',
-  scale: 'Scale',
-};
-
 export function UnresolvedEventsPage() {
+  const { t, i18n } = useTranslation();
   const { data, isLoading, isError } = useQuery({
     queryKey: ['unresolved-events'],
     queryFn: () => api.listUnresolvedEvents({ pageSize: 50 }),
@@ -33,17 +30,14 @@ export function UnresolvedEventsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-slate-900">Unresolved camera events</h1>
-      <p className="mb-4 text-sm text-slate-500">
-        Camera events the automatic flow could not turn into a ticket (unreadable plate). Create
-        the matching ticket by hand once you know which truck it was.
-      </p>
+      <h1 className="mb-1 text-xl font-semibold text-slate-900">{t('unresolvedEvents.title')}</h1>
+      <p className="mb-4 text-sm text-slate-500">{t('unresolvedEvents.description')}</p>
 
-      {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
-      {isError && <p className="text-sm text-red-600">Could not load unresolved events.</p>}
+      {isLoading && <p className="text-sm text-slate-500">{t('common.loading')}</p>}
+      {isError && <p className="text-sm text-red-600">{t('unresolvedEvents.loadError')}</p>}
 
       {data && data.items.length === 0 && (
-        <p className="py-8 text-center text-sm text-slate-500">No unresolved events. 🎉</p>
+        <p className="py-8 text-center text-sm text-slate-500">{t('unresolvedEvents.empty')}</p>
       )}
 
       {data && data.items.length > 0 && (
@@ -55,19 +49,22 @@ export function UnresolvedEventsPage() {
             >
               <div>
                 <span className="font-medium text-slate-900">
-                  {SOURCE_LABELS[event.source] ?? event.source}
+                  {t(`unresolvedEvents.sources.${event.source as RawEventSource}`)}
                 </span>
-                <span className="ml-2 text-slate-500">{formatDateTime(event.receivedAt)}</span>
+                <span className="ml-2 text-slate-500">
+                  {formatDateTime(event.receivedAt, i18n.language)}
+                </span>
                 <div className="text-xs text-slate-500">
-                  Camera: {guessCameraId(event.rawPayload)}
-                  {guessPlate(event.rawPayload) && ` · raw plate: "${guessPlate(event.rawPayload)}"`}
+                  {t('unresolvedEvents.camera', { cameraId: guessCameraId(event.rawPayload) })}
+                  {guessPlate(event.rawPayload) &&
+                    t('unresolvedEvents.rawPlate', { plate: guessPlate(event.rawPayload) })}
                 </div>
               </div>
               <Link
                 to={`/tickets/new?plate=${encodeURIComponent(guessPlate(event.rawPayload).toUpperCase())}`}
                 className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
               >
-                Create ticket
+                {t('unresolvedEvents.createTicket')}
               </Link>
             </li>
           ))}

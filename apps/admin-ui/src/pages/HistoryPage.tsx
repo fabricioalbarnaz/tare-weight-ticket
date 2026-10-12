@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { TicketFilters, type TicketFiltersValue } from '../components/tickets/TicketFilters';
 import { TicketTable } from '../components/tickets/TicketTable';
 
 export function HistoryPage() {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<TicketFiltersValue>({ status: 'ALL', search: '' });
   const [page, setPage] = useState(1);
   const pageSize = 20;
@@ -24,7 +26,7 @@ export function HistoryPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-slate-900">Ticket history</h1>
+      <h1 className="mb-4 text-xl font-semibold text-slate-900">{t('history.title')}</h1>
 
       <TicketFilters
         value={filters}
@@ -32,18 +34,16 @@ export function HistoryPage() {
           setFilters(next);
           setPage(1);
         }}
-        searchPlaceholder="Search all history by plate…"
+        searchPlaceholder={t('history.searchPlaceholder')}
       />
 
-      {isLoading && <p className="text-sm text-slate-500">Loading tickets…</p>}
-      {isError && <p className="text-sm text-red-600">Could not load tickets.</p>}
+      {isLoading && <p className="text-sm text-slate-500">{t('dashboard.loadingTickets')}</p>}
+      {isError && <p className="text-sm text-red-600">{t('dashboard.loadError')}</p>}
       {data && (
         <>
           <TicketTable tickets={data.items} />
           <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
-            <span>
-              Page {page} of {totalPages} ({data.total} tickets)
-            </span>
+            <span>{t('history.pageOf', { page, totalPages, total: data.total })}</span>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -51,7 +51,7 @@ export function HistoryPage() {
                 onClick={() => setPage((p) => p - 1)}
                 className="rounded-md px-3 py-1.5 ring-1 ring-slate-200 disabled:opacity-40"
               >
-                Previous
+                {t('history.previous')}
               </button>
               <button
                 type="button"
@@ -59,7 +59,7 @@ export function HistoryPage() {
                 onClick={() => setPage((p) => p + 1)}
                 className="rounded-md px-3 py-1.5 ring-1 ring-slate-200 disabled:opacity-40"
               >
-                Next
+                {t('history.next')}
               </button>
             </div>
           </div>

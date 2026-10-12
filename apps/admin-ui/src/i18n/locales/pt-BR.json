@@ -1,0 +1,182 @@
+{
+  "common": {
+    "loading": "Carregando…",
+    "yes": "Sim",
+    "no": "Não",
+    "cancel": "Cancelar",
+    "backToDashboard": "← Voltar ao painel"
+  },
+  "language": {
+    "label": "Idioma",
+    "pt-BR": "Português",
+    "en": "English"
+  },
+  "nav": {
+    "appName": "EixoLink",
+    "dashboard": "Painel",
+    "history": "Histórico",
+    "unresolvedEvents": "Eventos Não Resolvidos",
+    "hardwareStatus": "Status do Equipamento",
+    "logout": "Sair"
+  },
+  "login": {
+    "title": "Acesso do administrador",
+    "subtitle": "EixoLink — acesso administrativo local",
+    "username": "Usuário",
+    "password": "Senha",
+    "signIn": "Entrar",
+    "signingIn": "Entrando…",
+    "invalidCredentials": "Usuário ou senha inválidos.",
+    "genericError": "Não foi possível entrar. Tente novamente.",
+    "validation": {
+      "usernameRequired": "O usuário é obrigatório",
+      "passwordRequired": "A senha é obrigatória"
+    }
+  },
+  "dashboard": {
+    "title": "Tickets de hoje",
+    "newTicket": "Novo ticket",
+    "loadingTickets": "Carregando tickets…",
+    "loadError": "Não foi possível carregar os tickets."
+  },
+  "history": {
+    "title": "Histórico de tickets",
+    "searchPlaceholder": "Buscar em todo o histórico por placa…",
+    "pageOf": "Página {{page}} de {{totalPages}} ({{total}} tickets)",
+    "previous": "Anterior",
+    "next": "Próxima"
+  },
+  "hardwareStatus": {
+    "title": "Status do equipamento",
+    "loadError": "Não foi possível carregar o status do equipamento.",
+    "lastSeen": "Última vez visto: {{value}}",
+    "reachable": "Acessível",
+    "unreachable": "Inacessível",
+    "components": {
+      "cameraEntrance": "Câmera de entrada",
+      "cameraExit": "Câmera de saída",
+      "scale": "Balança (Digi-Tron Isis New)",
+      "printBridge": "Ponte de impressão",
+      "relay": "Relé de sinalização ao motorista"
+    },
+    "badge": {
+      "title": "Status do equipamento",
+      "allOk": "Todo o equipamento OK",
+      "someDown": "{{count}} componente(s) inacessível(is)"
+    }
+  },
+  "createTicket": {
+    "heading": "Criar ticket manualmente",
+    "description": "Use isso quando o fluxo automático falhar (placa ilegível, evento de câmera sem ticket correspondente) e o registro precisar ser feito manualmente."
+  },
+  "ticketDetail": {
+    "loading": "Carregando ticket…",
+    "notFound": "Ticket não encontrado.",
+    "ticketHeading": "Ticket #{{number}} —",
+    "entry": "Entrada",
+    "entryWeight": "Peso de entrada",
+    "exit": "Saída",
+    "exitWeight": "Peso de saída",
+    "netWeight": "Peso líquido",
+    "printedAt": "Impresso em",
+    "createdByAdmin": "Criado pelo administrador",
+    "auditTrail": "Trilha de auditoria"
+  },
+  "unresolvedEvents": {
+    "title": "Eventos de câmera não resolvidos",
+    "description": "Eventos de câmera que o fluxo automático não conseguiu transformar em ticket (placa ilegível). Crie o ticket correspondente manualmente quando souber de qual caminhão se trata.",
+    "loadError": "Não foi possível carregar os eventos não resolvidos.",
+    "empty": "Nenhum evento não resolvido. 🎉",
+    "camera": "Câmera: {{cameraId}}",
+    "rawPlate": " · placa lida: \"{{plate}}\"",
+    "createTicket": "Criar ticket",
+    "sources": {
+      "camera_entrance": "Câmera de entrada",
+      "camera_exit": "Câmera de saída",
+      "scale": "Balança"
+    }
+  },
+  "auditLog": {
+    "empty": "Ainda não há registros de auditoria.",
+    "by": "por {{actor}}",
+    "actions": {
+      "entry_captured": "Entrada capturada",
+      "entry_capture_failed": "Falha ao capturar entrada",
+      "entry_overwritten": "Entrada sobrescrita (novo disparo)",
+      "exit_captured": "Saída capturada",
+      "exit_capture_failed": "Falha ao capturar saída",
+      "anomaly_flagged": "Marcado como anomalia",
+      "manual_edit": "Editado manualmente",
+      "manual_create": "Criado manualmente",
+      "reprint": "Reimpresso"
+    }
+  },
+  "forms": {
+    "create": {
+      "plate": "Placa",
+      "entryDateTime": "Data e hora de entrada",
+      "entryWeight": "Peso de entrada (kg)",
+      "reason": "Motivo",
+      "reasonPlaceholder": "ex.: câmera de entrada não conseguiu ler a placa, criado a partir do evento não resolvido",
+      "submit": "Criar ticket",
+      "submitting": "Criando…",
+      "error": "Não foi possível criar o ticket. Tente novamente.",
+      "validation": {
+        "plate": "Informe a placa",
+        "dateTimeRequired": "Data e hora são obrigatórias",
+        "weightPositive": "O peso deve ser maior que 0",
+        "reason": "Explique por que este ticket está sendo criado manualmente (mínimo de 5 caracteres)"
+      }
+    },
+    "editLeg": {
+      "ariaLabel": "Editar peso de {{leg}}",
+      "heading": "Editar {{leg}}",
+      "legName": {
+        "entry": "entrada",
+        "exit": "saída"
+      },
+      "dateTime": "Data e hora",
+      "weight": "Peso (kg)",
+      "reason": "Motivo desta correção",
+      "reasonPlaceholder": "ex.: câmera leu a placa errada, peso digitado manualmente a partir do recibo impresso",
+      "submit": "Salvar correção",
+      "submitting": "Salvando…",
+      "success": "Salvo. Veja a trilha de auditoria abaixo.",
+      "error": "Não foi possível salvar. Tente novamente.",
+      "validation": {
+        "dateTimeRequired": "Data e hora são obrigatórias",
+        "weightPositive": "O peso deve ser maior que 0",
+        "reason": "Explique a correção (mínimo de 5 caracteres)"
+      }
+    },
+    "reprint": {
+      "button": "Reimprimir ticket",
+      "confirm": "Reimprimir #{{number}}?",
+      "confirmButton": "Confirmar",
+      "printing": "Imprimindo…",
+      "cancel": "Cancelar",
+      "error": "Falha ao reimprimir."
+    }
+  },
+  "tickets": {
+    "status": {
+      "ALL": "Todos",
+      "OPEN": "Aberto",
+      "CLOSED": "Fechado",
+      "ANOMALY": "Anomalia",
+      "NEEDS_ATTENTION": "Requer atenção"
+    },
+    "table": {
+      "ticketNumber": "Ticket #",
+      "plate": "Placa",
+      "status": "Status",
+      "entry": "Entrada",
+      "exit": "Saída",
+      "netWeight": "Peso líquido",
+      "empty": "Nenhum ticket encontrado."
+    },
+    "filters": {
+      "searchPlaceholder": "Buscar por placa…"
+    }
+  }
+}
