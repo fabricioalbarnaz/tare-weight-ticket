@@ -139,4 +139,51 @@ describe('createTcpScaleClient', () => {
     await expect(secondRead).resolves.toEqual({ weightKg: 12345, weightCaptureFailed: false });
     expect(server.connectionCount).toBe(2);
   });
+
+  describe('getStatus', () => {
+    it('reports disconnected with no lastSeenAt before any read', () => {
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: 1,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      expect(client.getStatus()).toEqual({ connected: false, lastSeenAt: null });
+    });
+
+    it('reports connected with a lastSeenAt timestamp after a stable read', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      const readPromise = client.readStableWeight();
+      await server.waitForConnection();
+      server.send('ST,20000');
+      await readPromise;
+
+      const status = client.getStatus();
+      expect(status.connected).toBe(true);
+      expect(status.lastSeenAt).toBeInstanceOf(Date);
+    });
+
+    it('reports disconnected again after a stability timeout forces a reconnect', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 300,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      await client.readStableWeight();
+      await server.waitForConnection();
+
+      expect(client.getStatus().connected).toBe(false);
+    });
+  });
 });

@@ -104,4 +104,42 @@ describe('createHttpRelayDriverSignalAdapter', () => {
     await expect(adapter.signalDriver('in')).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
   });
+
+  describe('getStatus', () => {
+    it('reports no attempts yet before any signal', () => {
+      const adapter = createHttpRelayDriverSignalAdapter({});
+      expect(adapter.getStatus()).toEqual({ lastSuccessAt: null, lastFailureAt: null });
+    });
+
+    it('records lastSuccessAt after a successful relay call', async () => {
+      const baseUrl = await startTestServer((_req, res) => res.writeHead(200).end());
+      const adapter = createHttpRelayDriverSignalAdapter({ entranceUrl: baseUrl });
+
+      await adapter.signalDriver('in');
+
+      const status = adapter.getStatus();
+      expect(status.lastSuccessAt).toBeInstanceOf(Date);
+      expect(status.lastFailureAt).toBeNull();
+    });
+
+    it('records lastFailureAt after a failed relay call', async () => {
+      const adapter = createHttpRelayDriverSignalAdapter({
+        entranceUrl: 'http://127.0.0.1:1/unreachable',
+      });
+
+      await adapter.signalDriver('in');
+
+      const status = adapter.getStatus();
+      expect(status.lastFailureAt).toBeInstanceOf(Date);
+      expect(status.lastSuccessAt).toBeNull();
+    });
+
+    it('does not record an attempt when the direction has no configured URL', async () => {
+      const adapter = createHttpRelayDriverSignalAdapter({});
+
+      await adapter.signalDriver('in');
+
+      expect(adapter.getStatus()).toEqual({ lastSuccessAt: null, lastFailureAt: null });
+    });
+  });
 });

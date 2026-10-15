@@ -6,6 +6,7 @@ import { loadScaleConfig } from './scale/config.js';
 import { createHttpRelayDriverSignalAdapter } from './driver-signal/http-relay-adapter.js';
 import { loadDriverSignalConfig } from './driver-signal/config.js';
 import { createHttpPrintClient } from './printing/print-client.js';
+import { loadAdminConfig } from './admin/config.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const dbPath = process.env.DB_PATH ?? './data/tare.sqlite';
@@ -32,7 +33,15 @@ const driverSignalAdapter = createHttpRelayDriverSignalAdapter({
 
 const printClient = createHttpPrintClient({ baseUrl: printBridgeUrl });
 
-const app = buildApp({ db, scaleClient, driverSignalAdapter, printClient });
+const adminConfig = loadAdminConfig();
+
+const app = buildApp({
+  db,
+  scaleClient,
+  driverSignalAdapter,
+  printClient,
+  adminSessionSecret: adminConfig.sessionSecret,
+});
 
 app.listen({ port, host: '0.0.0.0' }).catch((err) => {
   app.log.error(err);

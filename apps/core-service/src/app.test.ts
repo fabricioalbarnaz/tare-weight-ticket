@@ -17,6 +17,9 @@ function createFakeScaleClient(): ScaleClient {
     async readStableWeight() {
       return { weightKg: 1000, weightCaptureFailed: false };
     },
+    getStatus() {
+      return { connected: true, lastSeenAt: null };
+    },
     close() {},
   };
 }
@@ -24,6 +27,9 @@ function createFakeScaleClient(): ScaleClient {
 function createFakeDriverSignalAdapter(): DriverSignalAdapter {
   return {
     async signalDriver() {},
+    getStatus() {
+      return { lastSuccessAt: null, lastFailureAt: null };
+    },
   };
 }
 
@@ -31,6 +37,9 @@ function createFakePrintClient(): PrintClient {
   return {
     async printTicket() {
       return { success: true };
+    },
+    async checkHealth() {
+      return { reachable: true };
     },
   };
 }
@@ -57,6 +66,7 @@ describe('GET /health', () => {
       scaleClient: createFakeScaleClient(),
       driverSignalAdapter: createFakeDriverSignalAdapter(),
       printClient: createFakePrintClient(),
+      adminSessionSecret: 'a'.repeat(32),
     });
 
     const response = await app.inject({ method: 'GET', url: '/health' });

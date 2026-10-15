@@ -1,9 +1,43 @@
-import { and, eq, sql } from 'drizzle-orm';
-import { tickets, ticketAuditLog, rawEvents, type RawEventSource } from '../db/schema.js';
+import { and, count, desc, eq, gte, isNull, like, lte, sql } from 'drizzle-orm';
+import {
+  tickets,
+  ticketAuditLog,
+  rawEvents,
+  adminUsers,
+  type RawEventSource,
+  type TicketStatus,
+} from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { calculateNetWeightKg } from '../domain/net-weight.js';
 
 export type Ticket = typeof tickets.$inferSelect;
+export type TicketAuditLogEntry = typeof ticketAuditLog.$inferSelect;
+export type RawEvent = typeof rawEvents.$inferSelect;
+export type AdminUser = typeof adminUsers.$inferSelect;
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListTicketsQuery {
+  status?: TicketStatus;
+  search?: string;
+  from?: Date;
+  to?: Date;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListUnresolvedEventsQuery {
+  source?: RawEventSource;
+  page?: number;
+  pageSize?: number;
+}
+
+const DEFAULT_PAGE_SIZE = 20;
 
 export interface CreateTicketInput {
   plate: string;
@@ -11,6 +45,8 @@ export interface CreateTicketInput {
   entryWeightKg: number | null;
   entryCameraId: string | null;
   entryCaptureFailed: boolean;
+  /** True for tickets created from scratch by an admin (master plan §3.4 manual-create flow). Defaults to false. */
+  createdByAdmin?: boolean;
 }
 
 export interface UpdateEntryInput {
@@ -38,9 +74,17 @@ export interface FlagAnomalyInput {
 export interface TicketRepository {
   findOpenByPlate(plate: string): Ticket | undefined;
   findById(ticketId: number): Ticket | undefined;
+  listTickets(query: ListTicketsQuery): Paginated<Ticket>;
+  listUnresolvedEvents(query: ListUnresolvedEventsQuery): Paginated<RawEvent>;
+  findAuditLogByTicketId(ticketId: number): TicketAuditLogEntry[];
+  findAdminUserByUsername(username: string): AdminUser | undefined;
+  /** Timestamp of the most recent raw event received from this source, or null if none ever arrived. */
+  findLastEventTimestamp(source: RawEventSource): Date | null;
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
+  /** Corrects exit data on an already-CLOSED ticket (admin fix-after-the-fact), recomputing net weight. Does not change status. */
+  correctExit(ticketId: number, input: CloseTicketInput): Ticket;
   markPrinted(ticketId: number, printedAt: Date): Ticket;
   flagAnomaly(input: FlagAnomalyInput): Ticket;
   appendAuditLog(ticketId: number, actor: string, action: string, payload?: unknown): void;
@@ -82,6 +126,91 @@ export function createTicketRepository(db: Db): TicketRepository {
       return db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
     },
 
+    listTickets(query) {
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+
+      const conditions = [];
+      if (query.status) {
+        conditions.push(eq(tickets.status, query.status));
+      }
+      if (query.search) {
+        conditions.push(like(sql`upper(${tickets.plate})`, `%${query.search.toUpperCase()}%`));
+      }
+      if (query.from) {
+        conditions.push(gte(tickets.createdAt, query.from));
+      }
+      if (query.to) {
+        conditions.push(lte(tickets.createdAt, query.to));
+      }
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const items = db
+        .select()
+        .from(tickets)
+        .where(where)
+        .orderBy(desc(tickets.id))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize)
+        .all();
+
+      const { total } = db.select({ total: count() }).from(tickets).where(where).get() ?? {
+        total: 0,
+      };
+
+      return { items, total, page, pageSize };
+    },
+
+    listUnresolvedEvents(query) {
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+
+      const conditions = [isNull(rawEvents.linkedTicketId)];
+      if (query.source) {
+        conditions.push(eq(rawEvents.source, query.source));
+      }
+      const where = and(...conditions);
+
+      const items = db
+        .select()
+        .from(rawEvents)
+        .where(where)
+        .orderBy(desc(rawEvents.id))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize)
+        .all();
+
+      const { total } = db.select({ total: count() }).from(rawEvents).where(where).get() ?? {
+        total: 0,
+      };
+
+      return { items, total, page, pageSize };
+    },
+
+    findAuditLogByTicketId(ticketId) {
+      return db
+        .select()
+        .from(ticketAuditLog)
+        .where(eq(ticketAuditLog.ticketId, ticketId))
+        .orderBy(desc(ticketAuditLog.id))
+        .all();
+    },
+
+    findAdminUserByUsername(username) {
+      return db.select().from(adminUsers).where(eq(adminUsers.username, username)).get();
+    },
+
+    findLastEventTimestamp(source) {
+      const row = db
+        .select()
+        .from(rawEvents)
+        .where(eq(rawEvents.source, source))
+        .orderBy(desc(rawEvents.id))
+        .limit(1)
+        .get();
+      return row?.receivedAt ?? null;
+    },
+
     create(input) {
       const now = new Date();
       return db
@@ -94,6 +223,7 @@ export function createTicketRepository(db: Db): TicketRepository {
           entryWeightKg: input.entryWeightKg,
           entryCameraId: input.entryCameraId,
           entryCaptureFailed: input.entryCaptureFailed,
+          createdByAdmin: input.createdByAdmin ?? false,
           createdAt: now,
           updatedAt: now,
         })
@@ -147,6 +277,32 @@ export function createTicketRepository(db: Db): TicketRepository {
         throw new Error(`Cannot close ticket ${ticketId}: not found or not OPEN`);
       }
       return closed;
+    },
+
+    correctExit(ticketId, input) {
+      const current = requireById(ticketId);
+      if (current.status !== 'CLOSED') {
+        throw new Error(`Cannot correct exit for ticket ${ticketId}: not found or not CLOSED`);
+      }
+
+      const netWeightKg =
+        current.entryWeightKg !== null && input.exitWeightKg !== null
+          ? calculateNetWeightKg(current.entryWeightKg, input.exitWeightKg)
+          : null;
+
+      return db
+        .update(tickets)
+        .set({
+          exitAt: input.exitAt,
+          exitWeightKg: input.exitWeightKg,
+          exitCameraId: input.exitCameraId,
+          exitCaptureFailed: input.exitCaptureFailed,
+          netWeightKg,
+          updatedAt: new Date(),
+        })
+        .where(eq(tickets.id, ticketId))
+        .returning()
+        .get()!;
     },
 
     markPrinted(ticketId, printedAt) {

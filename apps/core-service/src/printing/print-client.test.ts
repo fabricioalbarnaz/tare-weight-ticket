@@ -89,4 +89,32 @@ describe('createHttpPrintClient', () => {
 
     expect(result.success).toBe(false);
   });
+
+  describe('checkHealth', () => {
+    it('reports reachable: true when /health responds 200', async () => {
+      const baseUrl = await startTestServer((req, res) => {
+        if (req.url === '/health') res.writeHead(200).end();
+      });
+
+      const client = createHttpPrintClient({ baseUrl });
+
+      expect(await client.checkHealth()).toEqual({ reachable: true });
+    });
+
+    it('reports reachable: false when the bridge is unreachable', async () => {
+      const client = createHttpPrintClient({ baseUrl: 'http://127.0.0.1:1' });
+
+      expect(await client.checkHealth()).toEqual({ reachable: false });
+    });
+
+    it('reports reachable: false when /health does not respond within the timeout', async () => {
+      const baseUrl = await startTestServer(() => {
+        // Never responds.
+      });
+
+      const client = createHttpPrintClient({ baseUrl, timeoutMs: 50 });
+
+      expect(await client.checkHealth()).toEqual({ reachable: false });
+    });
+  });
 });

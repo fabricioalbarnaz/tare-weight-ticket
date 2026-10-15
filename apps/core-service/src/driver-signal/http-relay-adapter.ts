@@ -25,6 +25,9 @@ export function createHttpRelayDriverSignalAdapter(
   const timeoutMs = options.timeoutMs ?? 3000;
   const method = options.method ?? 'GET';
 
+  let lastSuccessAt: Date | null = null;
+  let lastFailureAt: Date | null = null;
+
   async function callRelay(url: string | undefined, direction: DriverSignalDirection): Promise<void> {
     if (!url) return;
 
@@ -36,7 +39,9 @@ export function createHttpRelayDriverSignalAdapter(
       if (!response.ok) {
         throw new Error(`Relay responded with HTTP ${response.status}`);
       }
+      lastSuccessAt = new Date();
     } catch (err) {
+      lastFailureAt = new Date();
       options.onError?.(err instanceof Error ? err : new Error(String(err)), direction);
     } finally {
       clearTimeout(timer);
@@ -46,6 +51,10 @@ export function createHttpRelayDriverSignalAdapter(
   return {
     async signalDriver(direction) {
       await callRelay(direction === 'in' ? options.entranceUrl : options.exitUrl, direction);
+    },
+
+    getStatus() {
+      return { lastSuccessAt, lastFailureAt };
     },
   };
 }
