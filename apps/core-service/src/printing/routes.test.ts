@@ -24,12 +24,20 @@ function createFakeScaleClient(): ScaleClient {
     async readStableWeight() {
       return { weightKg: 0, weightCaptureFailed: true };
     },
+    getStatus() {
+      return { connected: true, lastSeenAt: null };
+    },
     close() {},
   };
 }
 
 function createFakeDriverSignalAdapter(): DriverSignalAdapter {
-  return { async signalDriver() {} };
+  return {
+    async signalDriver() {},
+    getStatus() {
+      return { lastSuccessAt: null, lastFailureAt: null };
+    },
+  };
 }
 
 function createFakePrintClient(): PrintClient {
@@ -37,6 +45,9 @@ function createFakePrintClient(): PrintClient {
     async printTicket() {
       printCalls += 1;
       return printTicketResult;
+    },
+    async checkHealth() {
+      return { reachable: true };
     },
   };
 }
@@ -54,6 +65,7 @@ beforeEach(() => {
     scaleClient: createFakeScaleClient(),
     driverSignalAdapter: createFakeDriverSignalAdapter(),
     printClient: createFakePrintClient(),
+    adminSessionSecret: 'a'.repeat(32),
   });
 });
 

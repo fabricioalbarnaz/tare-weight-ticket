@@ -22,6 +22,7 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   let parser: ScaleFrameParser | null = null;
   let connectPromise: Promise<net.Socket> | null = null;
   let waiters: Waiter[] = [];
+  let lastSeenAt: Date | null = null;
   // The scale is one physical resource: serialize reads so two concurrent
   // webhooks (entrance/exit) can never both be resolved by the same frame.
   let readQueue: Promise<ScaleReadResult> = Promise.resolve({
@@ -78,6 +79,7 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
           if (!parser) return;
           for (const frame of parser.push(chunk)) {
             if (!frame.stable) continue;
+            lastSeenAt = new Date();
             const pending = waiters;
             waiters = [];
             for (const waiter of pending) waiter(frame);
@@ -128,6 +130,10 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
       const result = readQueue.then(readOne, readOne);
       readQueue = result;
       return result;
+    },
+
+    getStatus() {
+      return { connected: socket !== null, lastSeenAt };
     },
 
     close() {

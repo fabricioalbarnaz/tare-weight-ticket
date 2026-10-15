@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOptionalUrl, parsePositiveInt } from './env.js';
+import { parseOptionalUrl, parsePositiveInt, parseRequiredSecret } from './env.js';
 
 describe('parsePositiveInt', () => {
   it('returns the fallback when the value is undefined', () => {
@@ -43,5 +43,19 @@ describe('parseOptionalUrl', () => {
 
   it('throws when the value is not a valid URL', () => {
     expect(() => parseOptionalUrl('X', 'not a url')).toThrow(/X/);
+  });
+});
+
+describe('parseRequiredSecret', () => {
+  it('returns the value when it meets the minimum length', () => {
+    expect(parseRequiredSecret('X', 'a'.repeat(32), 32)).toBe('a'.repeat(32));
+  });
+
+  it('throws when the value is unset', () => {
+    expect(() => parseRequiredSecret('X', undefined, 32)).toThrow(/X/);
+  });
+
+  it('throws when the value is shorter than the minimum length', () => {
+    expect(() => parseRequiredSecret('X', 'short', 32)).toThrow(/X/);
   });
 });

@@ -2,7 +2,7 @@
 
 Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
-Status: **Approved — Phases 0–1 complete (merged in PR #1); Phases 2–3 committed with an open PR; Phases 4–5 implemented, pending review/PR.**
+Status: **Approved — Phases 0–5 merged (PR #1, #2); Phase 6 Admin UI (frontend PR #3 + backend, this session) implemented, pending review/PR. Real hardware integrations (scale protocol, camera payload, printer transport, relay) intentionally deferred to the on-site deployment phase — see §7 update below.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -247,7 +247,18 @@ tare-weight-ticket/
 ## 7. Risks / open items to validate before or during implementation
 
 These are the things this plan cannot fully resolve from a conversation —
-flagging them now so they're deliberate decisions, not surprises mid-build:
+flagging them now so they're deliberate decisions, not surprises mid-build.
+
+**Decision (2026-10-13):** items 2–4 below (scale protocol, camera payload,
+driver signal hardware) require physical access to equipment we don't have
+yet in this development environment. Rather than block on vendor manuals
+that may never arrive before install day, these are explicitly deferred:
+the pluggable interfaces/placeholders built in Phases 2–4 stay as-is, and
+finishing them (real frame parser, real payload adapter, confirmed relay
+hardware) is in-scope for Phase 7 (Packaging & per-PC deployment), done
+on-site against the real equipment. Everything else (domain core, admin
+backend/frontend, print bridge against the placeholder transport) proceeds
+now without waiting on hardware.
 
 1. **USB printer inside Docker on Windows.** Needs a Phase 6 spike to
    confirm `usbipd-win` works reliably unattended (survives reboot, printer
@@ -323,9 +334,15 @@ runnable (even if incomplete) at the end of every phase.
   guarantee, manual reprint support.
 - **Phase 6 — Admin UI**: auth, dashboard, manual edit/create/reprint
   flows, hardware status panel, audit trail view.
+  **Frontend merged (PR #3)**, built against mocked API responses.
+  **Backend admin API implemented** (this session) — see
+  `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md`, pending
+  review/PR from the user.
 - **Phase 7 — Packaging & per-PC deployment**: finalize docker-compose for
   production, Windows auto-start configuration, `.env`-based per-balance
-  config, written install runbook for replicating to the 3 PCs.
+  config, written install runbook for replicating to the 3 PCs. **Also
+  where the deferred real hardware integrations (§7 decision above) get
+  finished, on-site against the actual scale, camera, and relay.**
 - **Phase 8 — Hardening**: structured logging + rotation, reconnect/retry
   resilience for scale/camera/printer/relay outages, SQLite backup strategy,
   basic load validation at ~200+ tickets/day, security pass on the Admin UI

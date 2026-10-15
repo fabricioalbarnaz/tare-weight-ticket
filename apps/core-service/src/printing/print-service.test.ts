@@ -25,6 +25,9 @@ function createFakePrintClient(): PrintClient {
       printCalls.push(ticket);
       return nextPrintResult;
     },
+    async checkHealth() {
+      return { reachable: true };
+    },
   };
 }
 
