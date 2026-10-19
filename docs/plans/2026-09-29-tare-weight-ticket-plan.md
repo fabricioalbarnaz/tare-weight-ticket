@@ -2,7 +2,7 @@
 
 Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
-Status: **Approved — Phases 0–5 merged (PR #1, #2); Phase 6 Admin UI (frontend PR #3 + backend, this session) implemented, pending review/PR. Real hardware integrations (scale protocol, camera payload, printer transport, relay) intentionally deferred to the on-site deployment phase — see §7 update below.**
+Status: **Approved — Phases 0–6 merged (PR #1–#4): domain core, scale/camera integration, driver-signal relay, print bridge, and the Admin UI (frontend + backend admin API). The real Hikvision ANPR camera payload (§7 item 3) is also implemented and merged (PR #5), alongside field diagnostics for the Digi-Tron Isis New scale protocol (§7 item 2 — still unresolved, see the runbook). Printer transport (`usbipd-win` spike) and driver-signal relay hardware remain deferred to the on-site deployment phase — see §7.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -327,10 +327,8 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
      (`pilotsafebelt`, `smoking`, `helmet`, etc., all `unknown` on the
      captured config) and picture bounding-box fields (`plateRect`,
      `vehicelRect`) that are not relevant to this system.
-   - Required adjustments to the camera integration, once scheduled (not
-     yet implemented — Phase 3 already shipped and merged against the
-     placeholder shape; this is tracked here as a follow-up, not as part of
-     the current working tree):
+   - **Implemented and merged (2026-10-19, PR #5)** — see §11 for the
+     decisions made while implementing. The adjustments made:
      - Webhook routes must accept `multipart/form-data` (e.g. via
        `@fastify/multipart`) instead of a JSON body with Fastify schema
        validation; the route needs to pull `anpr.xml` and the three JPEG
@@ -427,11 +425,9 @@ runnable (even if incomplete) at the end of every phase.
   print bridge service (chosen approach from §7.1), single-print-per-ticket
   guarantee, manual reprint support.
 - **Phase 6 — Admin UI**: auth, dashboard, manual edit/create/reprint
-  flows, hardware status panel, audit trail view.
-  **Frontend merged (PR #3)**, built against mocked API responses.
-  **Backend admin API implemented** (this session) — see
-  `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md`, pending
-  review/PR from the user.
+  flows, hardware status panel, audit trail view. **Merged** — frontend
+  (PR #3) and backend admin API (PR #4); see §11 for implementation
+  decisions.
 - **Phase 7 — Packaging & per-PC deployment**: finalize docker-compose for
   production, Windows auto-start configuration, `.env`-based per-balance
   config, written install runbook for replicating to the 3 PCs. **Also
@@ -595,3 +591,63 @@ Decisions and lessons from Phases 4–5:
   matching the camera webhook routes' convention of only using HTTP error
   codes for malformed requests. A print failure is never a reason to fail
   ticket processing — the system has no human in the loop by design.
+
+Decisions and lessons from Phase 6 — Admin backend API (merged PR #4; the
+per-feature plan, `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md`,
+is deleted after merge per `CLAUDE.md`):
+
+- **`bcryptjs`, not `bcrypt`**, for password hashing — avoids a second
+  node-gyp/native-build dependency on top of `better-sqlite3` on a dev
+  machine with no working Python toolchain for node-gyp.
+- **`@fastify/cookie`/`@fastify/session` are registered only inside the
+  `/api/admin` encapsulated plugin context**, not on the whole app, so the
+  camera/print routes are untouched by session plumbing. An in-memory
+  session store is enough — single process, single PC, no Redis needed.
+- **Every mutating admin route writes an audit log entry in the same
+  transaction as the mutation** (actor = logged-in username, payload
+  includes the mandatory `reason` plus before/after values) — same
+  transactional pattern as Phases 1–5.
+- **Hardware "reachability" needed small, targeted additions, not a new
+  subsystem**: `ScaleClient.getStatus()` and `DriverSignalAdapter.getStatus()`
+  track state already available on the TCP client/relay adapter;
+  `PrintClient.checkHealth()` reuses the print bridge's existing `/health`
+  route; camera reachability derives from the most recent `rawEvents` row
+  per source (`findLastEventTimestamp`), with a default 24h staleness
+  window.
+- **Contract types stay in `apps/admin-ui/src/api/types.ts`** as the single
+  source of truth for now, duplicated by hand into the backend route layer
+  rather than extracted into `packages/shared` — revisit only if the
+  duplication becomes painful (flagged as a Phase 8 hardening follow-up).
+- The Admin UI needed **zero code changes** to run against the real
+  backend — only `VITE_API_MODE=proxy` instead of `mock` — because the
+  backend routes were built to match `apps/admin-ui/src/api/types.ts` and
+  `client.ts` field-for-field.
+
+Decisions and lessons from the real Hikvision ANPR camera payload swap
+(merged PR #5; the per-feature plan,
+`docs/plans/2026-10-15-camera-anpr-integration-plan.md`, is deleted after
+merge per `CLAUDE.md`):
+
+- **JPEGs are drained and discarded, not stored** — no object storage
+  exists in this stack, and nothing in the ticket flow needs the images.
+- **The `anpr.xml` multipart part is located by its field name** (literally
+  `"anpr.xml"`), not by the `Content-ID` header the three JPEG parts use —
+  since the JPEGs are discarded anyway, the two never need distinguishing
+  any other way.
+- **Canonical plate field is `ANPR > licensePlate`** (agrees with
+  `originalLicensePlate` and `PlateInfoList > PlateInfo > licensePlate` in
+  every real capture seen).
+- **`cameraId` now comes from the payload's `deviceID`** instead of being
+  caller-supplied; entrance vs. exit is still decided by which webhook URL
+  received the POST (unchanged design) — `deviceID` is stored only for
+  display/audit.
+- **A plate read is accepted only if `confidenceLevel >= 80` and the
+  normalized plate is exactly 7 characters** (both Brazilian plate formats
+  are 7 chars); anything failing either check reaches the existing
+  `plate_unreadable` path with an empty `rawPlate`, rather than being
+  guessed at. Both thresholds are starting points, flagged for tuning once
+  there's real field data.
+- **The `payload-schema.ts`/`normalize.ts` isolation boundary deliberately
+  built in Phases 2–3 held exactly as intended** — `session-service.ts`
+  needed zero changes; only the camera-specific files and the webhook
+  routes' multipart handling changed.

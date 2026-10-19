@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phases 0–5 are complete and merged into `main`: PR #1 (Phase 0 scaffolding +
-Phase 1 domain core) and PR #2 (Phases 2–5 together: scale TCP integration,
-camera webhooks, driver-signal relay adapter, and the print bridge). See the
+Phases 0–6 are complete and merged into `main`: PR #1 (Phase 0 scaffolding +
+Phase 1 domain core), PR #2 (Phases 2–5 together: scale TCP integration,
+camera webhooks, driver-signal relay adapter, and the print bridge), PR #3
+(Phase 6 Admin UI frontend), PR #4 (Phase 6 admin backend API), and PR #5
+(real Hikvision ANPR camera payload + Isis New scale serial field
+diagnostics/docs). See the
 master plan's §11 "Implementation notes from completed phases" for the
 design decisions made along the way (most notably: `entryAt` is nullable to
 support `ANOMALY` tickets created from an exit-without-entrance event, scale
@@ -21,11 +24,15 @@ already in place for admin work (`ticketAuditLog`, `rawEvents`,
 `adminUsers`), and a session service (`src/tickets/session-service.ts`)
 implementing every business rule from the master plan's §5, all backed by
 real temp-file SQLite DBs in tests (no mocking the DB). `src/scale/` has a
-TCP client with stability-wait logic against a placeholder frame parser
-(real Isis New protocol still pending vendor manual/hardware access, master
-plan §7). `src/camera/` has the entrance/exit webhook routes with a generic
-payload schema + normalization layer (real camera vendor still pending).
-`src/driver-signal/` has a generic HTTP-relay adapter (real relay hardware
+TCP client with stability-wait logic against a placeholder frame parser —
+still a placeholder: field diagnostics against the real Digi-Tron Isis New
+indicator are underway (see `docs/runbooks/isis-new-serial-setup.md`) but
+the opening-burst/freshness/DGN-status questions aren't resolved yet, so no
+real parser has been written (master plan §7). `src/camera/` has the
+entrance/exit webhook routes against the **real** Hikvision ANPR
+`multipart/form-data` + `anpr.xml` payload (confirmed vendor format,
+swapped in from the earlier generic JSON placeholder — master plan §7 item
+3, §11). `src/driver-signal/` has a generic HTTP-relay adapter (real relay hardware
 still unchosen). `apps/print-bridge` (native, **not** containerized — USB
 access from Docker on Windows is unreliable) exposes `POST /print`,
 building ESC/POS bytes and sending them through a pluggable
@@ -35,30 +42,28 @@ wraps that with a `PrintService` (single-print guarantee via `printed_at`,
 manual reprint via `POST /tickets/:id/reprint`). The wire contract between
 the two apps lives in `packages/shared`.
 
-**Decision (2026-10-13):** finishing the real hardware integrations (scale
-protocol, camera payload, relay hardware) is deferred to Phase 7
+**Decision (2026-10-13):** finishing the remaining real hardware
+integrations (scale protocol, relay hardware) is deferred to Phase 7
 (per-PC deployment), done on-site once we have physical access to the
-equipment — see master plan §7. Don't treat the current placeholders there
-as bugs to fix now; they're intentionally parked.
+equipment — see master plan §7. Don't treat the scale placeholder as a bug
+to fix now; it's intentionally parked pending the field diagnostics above.
+The camera payload item of that same decision is **no longer deferred** —
+it was implemented and merged once the real vendor format was confirmed
+(PR #5, 2026-10-19), ahead of Phase 7, per the master plan §7 update.
 
-Phase 6 (Admin UI) is now fully implemented in this working tree, pending
-review and a PR from the user. The **frontend** (`apps/admin-ui`:
+Phase 6 (Admin UI) is fully merged: the **frontend** (`apps/admin-ui`:
 React/Vite SPA, auth, dashboard, manual edit/create/reprint flows with
 mandatory reason notes, hardware status panel, historical search, i18n
-pt-BR/en) was merged earlier (PR #3) against Mock Service Worker fixtures.
-The **backend admin API** (`core-service/src/admin/`) was added this
-session — see `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md` for
-the step-by-step breakdown (all 9 steps done) and the exact REST contract
-(mirrors `apps/admin-ui/src/api/types.ts` field-for-field, verified against
-a real running instance of both processes, not just unit tests). In short:
-bcryptjs + `@fastify/cookie`/`@fastify/session` for auth (session plugins
-registered only inside the `/api/admin` encapsulated context); new
-repository queries (`listTickets`, `listUnresolvedEvents`,
-`findAuditLogByTicketId`, `correctExit`, `findLastEventTimestamp`) and a
+pt-BR/en, PR #3) against Mock Service Worker fixtures, and the **backend
+admin API** (`core-service/src/admin/`, PR #4) — see master plan §11 for
+the design decisions (bcryptjs + `@fastify/cookie`/`@fastify/session` for
+auth, session plugins registered only inside the `/api/admin` encapsulated
+context; new repository queries `listTickets`, `listUnresolvedEvents`,
+`findAuditLogByTicketId`, `correctExit`, `findLastEventTimestamp`; a
 `createdByAdmin` flag on manual ticket creation; `ScaleClient`,
 `DriverSignalAdapter`, and `PrintClient` each grew a `getStatus()`/
-`checkHealth()` method feeding `GET /api/admin/status`. The Admin UI needed
-zero code changes to work against the real backend — just
+`checkHealth()` method feeding `GET /api/admin/status`). The Admin UI
+needed zero code changes to work against the real backend — just
 `VITE_API_MODE=proxy` instead of `mock`. No real hardware to test the
 Admin UI's own integration page against yet (that's Phase 7, on-site).
 

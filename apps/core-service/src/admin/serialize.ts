@@ -3,8 +3,7 @@ import type { RawEvent, Ticket, TicketAuditLogEntry } from '../tickets/repositor
 /**
  * Wire shapes for the Admin API, matching `apps/admin-ui/src/api/types.ts`
  * field-for-field (ISO date strings over JSON instead of `Date`/nullable
- * Dates). That frontend file is the contract's source of truth — see
- * `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md`.
+ * Dates). That frontend file is the contract's source of truth.
  */
 
 export interface SerializedTicket {

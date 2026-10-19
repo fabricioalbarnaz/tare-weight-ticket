@@ -47,9 +47,8 @@ const AUDIT_ACTIONS = {
 } as const;
 
 /**
- * Admin API for the Admin UI (master plan §3.4, §9 Phase 6). Mounted under
- * `/api/admin`; the exact contract is documented in
- * `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md` and mirrors
+ * Admin API for the Admin UI (master plan §3.4, §9 Phase 6, §11). Mounted
+ * under `/api/admin`; the exact contract mirrors
  * `apps/admin-ui/src/api/types.ts` field-for-field. Session/cookie plugins
  * are registered only inside this encapsulated context, so the camera
  * webhook and print-bridge routes stay untouched by them.
