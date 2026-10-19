@@ -25,6 +25,9 @@ function createFakeScaleClient(): ScaleClient {
     async readStableWeight() {
       return nextScaleReading;
     },
+    getStatus() {
+      return { connected: true, lastSeenAt: null };
+    },
     close() {},
   };
 }
@@ -34,6 +37,9 @@ function createFakeDriverSignalAdapter(): DriverSignalAdapter {
     async signalDriver(direction) {
       driverSignalCalls.push(direction);
     },
+    getStatus() {
+      return { lastSuccessAt: null, lastFailureAt: null };
+    },
   };
 }
 
@@ -42,6 +48,9 @@ function createFakePrintClient(): PrintClient {
     async printTicket() {
       printCalls += 1;
       return { success: true };
+    },
+    async checkHealth() {
+      return { reachable: true };
     },
   };
 }
@@ -60,6 +69,7 @@ beforeEach(() => {
     scaleClient: createFakeScaleClient(),
     driverSignalAdapter: createFakeDriverSignalAdapter(),
     printClient: createFakePrintClient(),
+    adminSessionSecret: 'a'.repeat(32),
   });
 });
 

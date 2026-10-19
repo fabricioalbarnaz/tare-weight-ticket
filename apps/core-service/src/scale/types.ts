@@ -16,8 +16,15 @@ export interface ScaleReadResult {
   weightCaptureFailed: boolean;
 }
 
+export interface ScaleStatus {
+  connected: boolean;
+  lastSeenAt: Date | null;
+}
+
 export interface ScaleClient {
   /** Waits for the indicator's next stable weight, bounded by a timeout. */
   readStableWeight(): Promise<ScaleReadResult>;
+  /** Current TCP connection state, for the Admin UI's hardware status panel. */
+  getStatus(): ScaleStatus;
   close(): void;
 }

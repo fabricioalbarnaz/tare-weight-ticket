@@ -4,67 +4,67 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 0 (scaffolding) is complete and verified end-to-end. npm workspaces,
-TS/ESLint/Prettier, and a minimal `@tare/core-service` Fastify app (with a
-`/health` route) exist; `docker build -f docker/Dockerfile.core-service .`
-builds and runs successfully (verified `GET /health` from inside the
-running container).
+Phases 0–5 are complete and merged into `main`: PR #1 (Phase 0 scaffolding +
+Phase 1 domain core) and PR #2 (Phases 2–5 together: scale TCP integration,
+camera webhooks, driver-signal relay adapter, and the print bridge). See the
+master plan's §11 "Implementation notes from completed phases" for the
+design decisions made along the way (most notably: `entryAt` is nullable to
+support `ANOMALY` tickets created from an exit-without-entrance event, scale
+timeouts are handled by the same entrance/exit handlers rather than a
+separate code path, each handler runs inside one SQLite transaction, and the
+driver signal fires right after every scale read — success or
+capture-failed — so the truck is never left stuck on the scale).
 
-Phase 1 (domain core) is complete and merged (PR #1) — see the master
-plan's §11 "Implementation notes from completed phases" for the design
-decisions made along the way (most notably: `entryAt` is nullable to
-support `ANOMALY` tickets created from an exit-without-entrance event,
-scale timeouts are handled by the same entrance/exit handlers rather than a
-separate code path, and each handler runs inside one SQLite transaction).
-`core-service` has a Drizzle/SQLite schema and migrations (`src/db/`), a
-ticket repository (`src/tickets/repository.ts`), and a session service
-(`src/tickets/session-service.ts`) implementing every business rule from
-the master plan's §5, all backed by real temp-file SQLite DBs in tests (no
-mocking the DB).
+In short: `core-service` has a Drizzle/SQLite schema and migrations
+(`src/db/`), a ticket repository (`src/tickets/repository.ts`) with tables
+already in place for admin work (`ticketAuditLog`, `rawEvents`,
+`adminUsers`), and a session service (`src/tickets/session-service.ts`)
+implementing every business rule from the master plan's §5, all backed by
+real temp-file SQLite DBs in tests (no mocking the DB). `src/scale/` has a
+TCP client with stability-wait logic against a placeholder frame parser
+(real Isis New protocol still pending vendor manual/hardware access, master
+plan §7). `src/camera/` has the entrance/exit webhook routes with a generic
+payload schema + normalization layer (real camera vendor still pending).
+`src/driver-signal/` has a generic HTTP-relay adapter (real relay hardware
+still unchosen). `apps/print-bridge` (native, **not** containerized — USB
+access from Docker on Windows is unreliable) exposes `POST /print`,
+building ESC/POS bytes and sending them through a pluggable
+`PrinterTransport` (currently a placeholder that writes jobs to a file — no
+printer hardware or `usbipd-win` spike yet). `core-service/src/printing/`
+wraps that with a `PrintService` (single-print guarantee via `printed_at`,
+manual reprint via `POST /tickets/:id/reprint`). The wire contract between
+the two apps lives in `packages/shared`.
 
-Phases 2–3 (scale integration + camera integration) are committed and a
-PR is open — see the master plan's §11 for the resulting design
-decisions. In short: `src/scale/` has a TCP client with stability-wait
-logic against a placeholder frame parser (real Isis New protocol still
-pending vendor manual, master plan §7.2) and a mock TCP scale server for
-tests; `src/camera/` has the entrance/exit webhook routes, a generic
-payload schema + normalization layer (real camera vendor still pending,
-master plan §7.3), wired into the session service. `buildApp()` takes
-`{ db, scaleClient, ... }`; `server.ts` builds the real SQLite db
-(`DB_PATH`) and TCP scale client (`SCALE_*` env vars) for production use.
-PR review also caught and fixed: a shared-scale-client race between
-concurrent entrance/exit webhooks (reads are now serialized), a
-Dockerfile missing the `drizzle/` migrations folder in the runtime stage,
-and a couple of TCP-client robustness gaps (crash on teardown, no
-reconnect after a stability timeout).
+**Decision (2026-10-13):** finishing the real hardware integrations (scale
+protocol, camera payload, relay hardware) is deferred to Phase 7
+(per-PC deployment), done on-site once we have physical access to the
+equipment — see master plan §7. Don't treat the current placeholders there
+as bugs to fix now; they're intentionally parked.
 
-Phases 4–5 (driver signal + print bridge) are implemented in this working
-tree, pending review and a PR from the user — see
-`docs/plans/2026-10-10-phase-4-5-driver-signal-print-bridge.md` for the
-step-by-step breakdown and the master plan's §11 for the resulting design
-decisions. In short: `src/driver-signal/` has a generic HTTP-relay
-adapter (real relay hardware still unchosen, master plan §7.4), fired
-right after every scale read (success or capture-failed) so the truck is
-never left stuck on the scale, regardless of the ticket outcome. A new
-workspace `apps/print-bridge` (native, **not** containerized — USB access
-from Docker on Windows is unreliable, master plan §7.1) exposes
-`POST /print`: it builds ESC/POS bytes from the ticket fields and sends
-them through a pluggable `PrinterTransport` (currently a placeholder that
-writes jobs to a file — no printer hardware or `usbipd-win` spike yet).
-`core-service/src/printing/` has the HTTP client to that bridge, a
-`PrintService` wrapping it with the repository (single-print guarantee
-via `printed_at`, manual reprint via `POST /tickets/:id/reprint`), wired
-into the exit webhook route right after a ticket closes. The wire
-contract between the two apps (`PrintTicketRequest`/`PrintTicketResponse`)
-lives in `packages/shared` — its first real use, which required
-reordering the root `package.json` workspaces array (`packages/*` before
-`apps/*`) so `@tare/shared` builds before its consumers. `npm run lint`,
-`npm run typecheck`, `npm run test` (104 core-service + 10 print-bridge
-tests), and `npm run build` all pass from the repo root under Node 24.
+Phase 6 (Admin UI) is now fully implemented in this working tree, pending
+review and a PR from the user. The **frontend** (`apps/admin-ui`:
+React/Vite SPA, auth, dashboard, manual edit/create/reprint flows with
+mandatory reason notes, hardware status panel, historical search, i18n
+pt-BR/en) was merged earlier (PR #3) against Mock Service Worker fixtures.
+The **backend admin API** (`core-service/src/admin/`) was added this
+session — see `docs/plans/2026-10-13-phase6-admin-backend-api-plan.md` for
+the step-by-step breakdown (all 9 steps done) and the exact REST contract
+(mirrors `apps/admin-ui/src/api/types.ts` field-for-field, verified against
+a real running instance of both processes, not just unit tests). In short:
+bcryptjs + `@fastify/cookie`/`@fastify/session` for auth (session plugins
+registered only inside the `/api/admin` encapsulated context); new
+repository queries (`listTickets`, `listUnresolvedEvents`,
+`findAuditLogByTicketId`, `correctExit`, `findLastEventTimestamp`) and a
+`createdByAdmin` flag on manual ticket creation; `ScaleClient`,
+`DriverSignalAdapter`, and `PrintClient` each grew a `getStatus()`/
+`checkHealth()` method feeding `GET /api/admin/status`. The Admin UI needed
+zero code changes to work against the real backend — just
+`VITE_API_MODE=proxy` instead of `mock`. No real hardware to test the
+Admin UI's own integration page against yet (that's Phase 7, on-site).
 
-Next: Phase 6 (Admin UI), not started in this repo — note a sibling
-worktree/branch is scaffolding an admin UI frontend independently; check
-with the user before assuming scope there.
+`npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
+passed from the repo root as of the last phases merged; re-verify rather
+than trusting this note once new work lands.
 
 Before doing any work here, read the latest file in `docs/plans/` (currently
 `docs/plans/2026-09-29-tare-weight-ticket-plan.md`) in full — it is the
@@ -150,3 +150,15 @@ repo, the `@tare/*` packages, file paths, or Docker images to match.
 - The user handles all commits and PRs themselves — never run `git commit`
   or open a PR. Instead, after each deliverable, suggest a small commit
   message and a PR description for the user to use.
+- **Local `npm install`/`npm run build|test|lint|typecheck` do not work
+  directly on this Windows dev machine**: there's no working Python
+  toolchain for node-gyp, which `better-sqlite3`'s native build needs (and
+  would need for any other native dependency — avoid adding one; prefer a
+  pure-JS alternative as was done for password hashing, `bcryptjs` instead
+  of `bcrypt`). Verify changes instead via a throwaway Linux container,
+  matching how `docker/Dockerfile.core-service` already handles this native
+  build: `docker run --rm -v "$(pwd):/app" -w /app node:24-alpine sh -c
+  "apk add --no-cache python3 make g++ && npm install && <command>"` (on
+  Windows Git Bash, prefix with `MSYS_NO_PATHCONV=1` so `-w /app` isn't
+  mangled into a Windows path). This also regenerates `package-lock.json`
+  correctly when dependencies change.
