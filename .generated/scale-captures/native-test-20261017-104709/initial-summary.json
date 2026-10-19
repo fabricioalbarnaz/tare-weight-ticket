@@ -1,0 +1,45 @@
+{
+  "phase": "initial",
+  "started_at": "2026-10-17T10:47:09.616664-03:00",
+  "bytes": 18323,
+  "chunks": 4922,
+  "empty_reads": 19,
+  "native_errors": [],
+  "settings_before": {
+    "baud": 9600,
+    "byte_size": 8,
+    "parity": 0,
+    "stop_bits": 0,
+    "flags": "0x11",
+    "dtr_control": 1,
+    "rts_control": 0
+  },
+  "effective_settings": {
+    "baud": 9600,
+    "byte_size": 8,
+    "parity": 0,
+    "stop_bits": 0,
+    "flags": "0x11",
+    "dtr_control": 1,
+    "rts_control": 0
+  },
+  "effective_timeouts": {
+    "read_interval": 4294967295,
+    "read_multiplier": 4294967295,
+    "read_constant": 300,
+    "write_multiplier": 0,
+    "write_constant": 300
+  },
+  "queue_before_purge": {
+    "error_mask": 0,
+    "in_queue": 135,
+    "out_queue": 0
+  },
+  "queue_after_purge": {
+    "error_mask": 0,
+    "in_queue": 0,
+    "out_queue": 0
+  },
+  "duration_seconds": 10.045,
+  "ended_at": "2026-10-17T10:47:19.772364-03:00"
+}

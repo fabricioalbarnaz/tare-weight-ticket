@@ -283,6 +283,17 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    so the stability-wait logic and session wiring can be built and tested
    now; the real Isis New parser and captured-frame fixtures are added
    once the manual or hardware access arrives.
+   **Field update (2026-10-17):** a supplied Isis New user manual and live
+   RS-232 access are now available. Standalone Windows captures using an FTDI
+   USB-RS-232 adapter matched the indicator at 9600 8N1 with DTR enabled.
+   Serial DGN continuous acquisition is the field-tested direction for this
+   installation; the application still uses the placeholder TCP client.
+   Opening bursts, fresh-sample guarantees, exact DGN status flags, and the
+   Windows/Docker deployment boundary remain unresolved. See
+   [the setup and field findings runbook](../runbooks/isis-new-serial-setup.md)
+   before implementing the serial transport. This update supersedes the earlier
+   statement that no scale manual or hardware access is available, but does not
+   establish a real TCP protocol or production acceptance.
 3. **Camera model/webhook payload format — confirmed 2026-10-15.** The
    camera hardware is a Hikvision ANPR unit (`iDS-2CD7A46G0/P-IZHS` family)
    pushing events via the ISAPI `Event/notification/httpHosts` mechanism.

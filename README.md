@@ -17,6 +17,9 @@ working title; only the user-facing Admin UI uses the product name.
 See `CLAUDE.md` for architecture/workflow guidance and `docs/plans/` for the
 full development plan and any in-progress feature plans.
 
+For Windows driver setup, serial capture procedures, field findings, and remaining
+scale validation, see the [Isis New serial setup runbook](docs/runbooks/isis-new-serial-setup.md).
+
 ## Development
 
 Requires Node 24 (see `.nvmrc`).
