@@ -1,0 +1,165 @@
+{
+  "note": "Timing analysis excludes the first second to separate the opening burst; this is a diagnostic filter, not a validated production freshness rule.",
+  "results": [
+    {
+      "phase": "continuous",
+      "durationSeconds": 90.204,
+      "totalBytes": 71935,
+      "firstSecondBytes": 70387,
+      "afterFirstSecond": {
+        "frames": 172,
+        "invalidFrames": 0,
+        "maxGapSeconds": 0.522,
+        "first": {
+          "seconds": 1.080575,
+          "text": "F000000."
+        },
+        "last": {
+          "seconds": 89.892186,
+          "text": "F000000."
+        },
+        "prefixes": [
+          [
+            "F",
+            172
+          ]
+        ],
+        "topFrames": [
+          [
+            "F000000.",
+            172
+          ]
+        ],
+        "changes": [
+          {
+            "seconds": 1.080575,
+            "text": "F000000."
+          }
+        ],
+        "partialTailHex": ""
+      },
+      "serialErrors": [],
+      "failure": null
+    },
+    {
+      "phase": "reopen-1",
+      "durationSeconds": 10.022,
+      "totalBytes": 171,
+      "firstSecondBytes": 18,
+      "afterFirstSecond": {
+        "frames": 17,
+        "invalidFrames": 0,
+        "maxGapSeconds": 0.52,
+        "first": {
+          "seconds": 1.400821,
+          "text": "F000000."
+        },
+        "last": {
+          "seconds": 9.710191,
+          "text": "F000000."
+        },
+        "prefixes": [
+          [
+            "F",
+            17
+          ]
+        ],
+        "topFrames": [
+          [
+            "F000000.",
+            17
+          ]
+        ],
+        "changes": [
+          {
+            "seconds": 1.400821,
+            "text": "F000000."
+          }
+        ],
+        "partialTailHex": ""
+      },
+      "serialErrors": [],
+      "failure": null
+    },
+    {
+      "phase": "reopen-2",
+      "durationSeconds": 10.057,
+      "totalBytes": 171,
+      "firstSecondBytes": 18,
+      "afterFirstSecond": {
+        "frames": 17,
+        "invalidFrames": 0,
+        "maxGapSeconds": 0.524,
+        "first": {
+          "seconds": 1.431892,
+          "text": "F000000."
+        },
+        "last": {
+          "seconds": 9.740646,
+          "text": "F000000."
+        },
+        "prefixes": [
+          [
+            "F",
+            17
+          ]
+        ],
+        "topFrames": [
+          [
+            "F000000.",
+            17
+          ]
+        ],
+        "changes": [
+          {
+            "seconds": 1.431892,
+            "text": "F000000."
+          }
+        ],
+        "partialTailHex": ""
+      },
+      "serialErrors": [],
+      "failure": null
+    },
+    {
+      "phase": "reopen-3",
+      "durationSeconds": 10.069,
+      "totalBytes": 171,
+      "firstSecondBytes": 18,
+      "afterFirstSecond": {
+        "frames": 17,
+        "invalidFrames": 0,
+        "maxGapSeconds": 0.528,
+        "first": {
+          "seconds": 1.44095,
+          "text": "F000000."
+        },
+        "last": {
+          "seconds": 9.752782,
+          "text": "F000000."
+        },
+        "prefixes": [
+          [
+            "F",
+            17
+          ]
+        ],
+        "topFrames": [
+          [
+            "F000000.",
+            17
+          ]
+        ],
+        "changes": [
+          {
+            "seconds": 1.44095,
+            "text": "F000000."
+          }
+        ],
+        "partialTailHex": ""
+      },
+      "serialErrors": [],
+      "failure": null
+    }
+  ]
+}

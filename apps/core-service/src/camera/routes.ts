@@ -1,9 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ScaleClient } from '../scale/types.js';
 import type { DriverSignalAdapter } from '../driver-signal/types.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { EntranceResult, ExitResult, SessionService } from '../tickets/session-service.js';
-import { cameraWebhookPayloadSchema, type CameraWebhookPayload } from './payload-schema.js';
+import { parseAnprXml } from './anpr-xml.js';
 import { normalizeCameraPayload } from './normalize.js';
 
 export interface CameraRoutesOptions {
@@ -13,52 +13,97 @@ export interface CameraRoutesOptions {
   printService: PrintService;
 }
 
-export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
-  app.post<{ Body: CameraWebhookPayload }>(
-    '/webhooks/camera/entrance',
-    { schema: { body: cameraWebhookPayloadSchema } },
-    async (request, reply) => {
-      const event = normalizeCameraPayload(request.body);
-      const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
-      // The truck is on the scale regardless of the outcome below (missing
-      // ticket, failed capture, etc.) — it must never be left stuck there.
-      await options.driverSignalAdapter.signalDriver('in');
+const ANPR_XML_FIELD_NAME = 'anpr.xml';
 
-      const result = options.sessionService.handleEntranceReading({
-        rawPlate: event.rawPlate,
-        cameraId: event.cameraId,
-        timestamp: event.timestamp,
-        weightKg,
-        weightCaptureFailed,
-      });
+/**
+ * The real camera push is `multipart/form-data`: one `anpr.xml` part (the
+ * event metadata this system cares about) plus three JPEG parts
+ * (`detectionPicture`/`featurePicture`/`licensePlatePicture`), per the
+ * real capture in the master plan §7 item 3. The JPEGs are drained (so the
+ * request body is fully consumed) and discarded — nothing in this system
+ * stores images today. Returns `null` (and has already replied 400) if the
+ * `anpr.xml` part is missing or malformed.
+ */
+async function readAnprXmlPart(request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
+  let xml: string | null = null;
 
-      reply.send(toResponseBody(result));
-    },
-  );
-
-  app.post<{ Body: CameraWebhookPayload }>(
-    '/webhooks/camera/exit',
-    { schema: { body: cameraWebhookPayloadSchema } },
-    async (request, reply) => {
-      const event = normalizeCameraPayload(request.body);
-      const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
-      await options.driverSignalAdapter.signalDriver('out');
-
-      const result = options.sessionService.handleExitReading({
-        rawPlate: event.rawPlate,
-        cameraId: event.cameraId,
-        timestamp: event.timestamp,
-        weightKg,
-        weightCaptureFailed,
-      });
-
-      if (result.kind === 'ticket_closed') {
-        await options.printService.printIfNeeded(result.ticket);
+  for await (const part of request.parts()) {
+    if (part.type === 'file') {
+      const buffer = await part.toBuffer();
+      if (part.fieldname === ANPR_XML_FIELD_NAME) {
+        xml = buffer.toString('utf8');
       }
+    }
+  }
 
-      reply.send(toResponseBody(result));
-    },
-  );
+  if (xml === null) {
+    reply.code(400).send({ error: `missing "${ANPR_XML_FIELD_NAME}" part` });
+    return null;
+  }
+
+  return xml;
+}
+
+export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
+  app.post('/webhooks/camera/entrance', async (request, reply) => {
+    const xml = await readAnprXmlPart(request, reply);
+    if (xml === null) return;
+
+    let anprEvent;
+    try {
+      anprEvent = parseAnprXml(xml);
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+      return;
+    }
+
+    const event = normalizeCameraPayload(anprEvent);
+    const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
+    // The truck is on the scale regardless of the outcome below (missing
+    // ticket, failed capture, etc.) — it must never be left stuck there.
+    await options.driverSignalAdapter.signalDriver('in');
+
+    const result = options.sessionService.handleEntranceReading({
+      rawPlate: event.rawPlate,
+      cameraId: event.cameraId,
+      timestamp: event.timestamp,
+      weightKg,
+      weightCaptureFailed,
+    });
+
+    reply.send(toResponseBody(result));
+  });
+
+  app.post('/webhooks/camera/exit', async (request, reply) => {
+    const xml = await readAnprXmlPart(request, reply);
+    if (xml === null) return;
+
+    let anprEvent;
+    try {
+      anprEvent = parseAnprXml(xml);
+    } catch (err) {
+      reply.code(400).send({ error: (err as Error).message });
+      return;
+    }
+
+    const event = normalizeCameraPayload(anprEvent);
+    const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
+    await options.driverSignalAdapter.signalDriver('out');
+
+    const result = options.sessionService.handleExitReading({
+      rawPlate: event.rawPlate,
+      cameraId: event.cameraId,
+      timestamp: event.timestamp,
+      weightKg,
+      weightCaptureFailed,
+    });
+
+    if (result.kind === 'ticket_closed') {
+      await options.printService.printIfNeeded(result.ticket);
+    }
+
+    reply.send(toResponseBody(result));
+  });
 }
 
 function toResponseBody(result: EntranceResult | ExitResult): { kind: string; ticketId?: number } {

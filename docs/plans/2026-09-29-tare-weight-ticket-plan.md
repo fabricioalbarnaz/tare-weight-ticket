@@ -260,6 +260,14 @@ on-site against the real equipment. Everything else (domain core, admin
 backend/frontend, print bridge against the placeholder transport) proceeds
 now without waiting on hardware.
 
+**Update (2026-10-15):** item 3 (camera payload) no longer needs to wait
+for on-site hardware access — the real camera model and webhook payload
+format are now confirmed from a vendor-accurate capture (see the updated
+item 3 below), so the adjustments it describes can be scheduled as their
+own change ahead of Phase 7 once the user decides to prioritize it. Items
+2 and 4 (scale protocol, driver-signal relay hardware) are unaffected and
+remain deferred to Phase 7 — no equivalent findings exist for those yet.
+
 1. **USB printer inside Docker on Windows.** Needs a Phase 6 spike to
    confirm `usbipd-win` works reliably unattended (survives reboot, printer
    power-cycle, USB replug) before committing to it over the native print
@@ -275,11 +283,97 @@ now without waiting on hardware.
    so the stability-wait logic and session wiring can be built and tested
    now; the real Isis New parser and captured-frame fixtures are added
    once the manual or hardware access arrives.
-3. **Exact camera model/webhook payload format.** "Pushes an HTTP webhook"
-   covers many ANPR vendors with different JSON/XML shapes and auth
-   schemes. Phase 3 needs the actual camera model to build the exact
-   payload adapter (kept isolated behind a small normalization layer so
-   swapping camera vendors later doesn't touch core logic).
+   **Field update (2026-10-17):** a supplied Isis New user manual and live
+   RS-232 access are now available. Standalone Windows captures using an FTDI
+   USB-RS-232 adapter matched the indicator at 9600 8N1 with DTR enabled.
+   Serial DGN continuous acquisition is the field-tested direction for this
+   installation; the application still uses the placeholder TCP client.
+   Opening bursts, fresh-sample guarantees, exact DGN status flags, and the
+   Windows/Docker deployment boundary remain unresolved. See
+   [the setup and field findings runbook](../runbooks/isis-new-serial-setup.md)
+   before implementing the serial transport. This update supersedes the earlier
+   statement that no scale manual or hardware access is available, but does not
+   establish a real TCP protocol or production acceptance.
+3. **Camera model/webhook payload format — confirmed 2026-10-15.** The
+   camera hardware is a Hikvision ANPR unit (`iDS-2CD7A46G0/P-IZHS` family)
+   pushing events via the ISAPI `Event/notification/httpHosts` mechanism.
+   These findings were captured against a different project
+   (`truck-load-queue`, same camera hardware) and are recorded in full at
+   `C:\Users\fabri\Documents\Sites\truck-load-queue\docs\anpr-event-payload-findings.md`
+   — only the camera-specific parts of that analysis apply here; its
+   app-specific conclusions (Rails controller names, `Event#payload`, etc.)
+   don't. Confirmed shape, which **supersedes** the generic
+   `{ plate, cameraId, timestamp }` JSON placeholder currently implemented
+   in `src/camera/payload-schema.ts`/`normalize.ts` (built per the Phase
+   2–3 note in §11 before any real camera info was available):
+   - **Transport is `multipart/form-data`, not JSON** — this is the
+     camera's fixed behavior for ANPR events, not a configuration option.
+     Parts: `anpr.xml` (`Content-Type: application/xml`, the event
+     metadata) plus three JPEGs (`detectionPicture`, `featurePicture`,
+     `licensePlatePicture`) identified by their `Content-ID` header, not
+     by form field name or their GUID-looking filenames.
+   - **`anpr.xml` root** is
+     `<EventNotificationAlert version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">`,
+     with `ipAddress`, `macAddress`, `dateTime`, `eventType`, `eventState`,
+     `deviceID`, `UUID`, `picNum`, `deviceUUID` at the top level, and the
+     plate data nested under `<ANPR>`: `licensePlate`,
+     `originalLicensePlate` (agreed with `licensePlate` in every capture
+     seen so far — redundant), `confidenceLevel`, `plateCharBelieve` (one
+     confidence value per character of `licensePlate` — a built-in,
+     per-character read-quality signal), `direction`, `country`,
+     `plateType`, `plateColor`, `vehicleType`, `vehicleInfo`. The plate and
+     confidence repeat a third time under `PlateInfoList > PlateInfo`. The
+     payload also carries a lot of AI-cabin/driver-feature fields
+     (`pilotsafebelt`, `smoking`, `helmet`, etc., all `unknown` on the
+     captured config) and picture bounding-box fields (`plateRect`,
+     `vehicelRect`) that are not relevant to this system.
+   - Required adjustments to the camera integration, once scheduled (not
+     yet implemented — Phase 3 already shipped and merged against the
+     placeholder shape; this is tracked here as a follow-up, not as part of
+     the current working tree):
+     - Webhook routes must accept `multipart/form-data` (e.g. via
+       `@fastify/multipart`) instead of a JSON body with Fastify schema
+       validation; the route needs to pull `anpr.xml` and the three JPEG
+       parts out of the multipart stream by `Content-ID`.
+     - Add an XML parser (e.g. `fast-xml-parser`) to extract
+       `licensePlate` (either `ANPR > licensePlate` or
+       `PlateInfoList > PlateInfo > licensePlate` — pick one as canonical
+       since both have agreed in every capture so far), `confidenceLevel`,
+       `dateTime`, `deviceID`.
+     - Decide a minimum `confidenceLevel`/character-count threshold before
+       treating a plate read as reliable enough to auto-act on, vs. routing
+       it to the existing `plate_unreadable`/`raw_events`-only outcome from
+       §5. Per the truck-load-queue findings, a short `licensePlate` (fewer
+       characters than the expected Mercosul 7-character format) should be
+       treated with suspicion even when every individual
+       `plateCharBelieve` value is high (95–99%) — a real capture there
+       produced a 5-character read that was likely a truncated 7-character
+       plate despite high per-character confidence, so character *count*
+       needs its own check independent of `confidenceLevel`.
+     - Decide whether entrance vs. exit continues to be determined by which
+       webhook URL/camera fired (current §5/§9 approach — each physical
+       camera configured with its own `httpHosts` target), or by the
+       payload's own `<ANPR><direction>` field now that it's confirmed to
+       exist. Leaning toward keeping the current per-endpoint approach — it
+       doesn't depend on trusting the camera's own direction
+       classification — unless a reason to change surfaces.
+     - Decide whether to persist the full `anpr.xml` (verbatim, or just the
+       `<ANPR>`/`PlateInfoList` subset) as `raw_events.raw_payload`, and
+       whether to store the three JPEGs at all — this stack has no object
+       storage today, so that would need a decision on local-disk
+       retention/rotation vs. discarding the images entirely on receipt.
+     - `src/camera/payload-schema.ts`/`normalize.ts` stays the isolation
+       boundary (per the existing Phase 2–3 design note in §11): only those
+       files plus the route's content-type/parsing handling should need to
+       change; the session service keeps consuming the same normalized
+       `{ plate, cameraId, timestamp }` shape it does today.
+   - **Still not known for this project specifically** (the findings above
+     are camera-hardware-only, carried over from `truck-load-queue`, and
+     need confirming against this project's actual two cameras once
+     reachable): the real IP/hostnames, which `deviceID` maps to entrance
+     vs. exit, and TLS/auth configuration for the `httpHosts` push target.
+   - **Scale integration (§7.2) remains fully unconfirmed** — no equivalent
+     real-protocol findings exist yet for the Digi-Tron Isis New indicator.
 4. **Driver signal hardware** is not chosen yet. Default network relay
    assumption should be confirmed or replaced before Phase 5.
 5. **Admin auth strength**: username/password + session cookie is proposed

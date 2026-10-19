@@ -1,0 +1,273 @@
+{
+  "limitation": "Excluding the first second is only a diagnostic comparison; it does not establish a production freshness or startup rule.",
+  "results": [
+    {
+      "phase": "initial",
+      "durationSeconds": 10.045,
+      "totalBytes": 18323,
+      "firstSecondBytes": 18169,
+      "bytesBySecond": [
+        [
+          0,
+          18169
+        ],
+        [
+          1,
+          18
+        ],
+        [
+          2,
+          18
+        ],
+        [
+          3,
+          18
+        ],
+        [
+          4,
+          18
+        ],
+        [
+          5,
+          18
+        ],
+        [
+          6,
+          18
+        ],
+        [
+          7,
+          18
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          10,
+          1
+        ]
+      ],
+      "maxReportedQueue": 42,
+      "firstValid": {
+        "seconds": 0.696765,
+        "frame": "F000000."
+      },
+      "lastValid": {
+        "seconds": 9.52547,
+        "frame": "@021900."
+      },
+      "invalidFrames": [
+        {
+          "seconds": 0.176998,
+          "bytes": 18159,
+          "hexPrefix": "463030303030fe463030303030fe463030303030fe463030"
+        }
+      ],
+      "afterFirstSecond": {
+        "frameCount": 17,
+        "maxGapSeconds": 0.52,
+        "distinctFrames": [
+          [
+            "F000000.",
+            11
+          ],
+          [
+            "B000000.",
+            1
+          ],
+          [
+            "@003400.",
+            1
+          ],
+          [
+            "@017460.",
+            1
+          ],
+          [
+            "@022800.",
+            1
+          ],
+          [
+            "@023300.",
+            1
+          ],
+          [
+            "@021900.",
+            1
+          ]
+        ]
+      },
+      "partialTailHex": "40",
+      "nativeErrors": [],
+      "settings": {
+        "baud": 9600,
+        "byte_size": 8,
+        "parity": 0,
+        "stop_bits": 0,
+        "flags": "0x11",
+        "dtr_control": 1,
+        "rts_control": 0
+      },
+      "queueAfterPurge": {
+        "error_mask": 0,
+        "in_queue": 0,
+        "out_queue": 0
+      }
+    },
+    {
+      "phase": "after-idle",
+      "durationSeconds": 20.161,
+      "totalBytes": 69620,
+      "firstSecondBytes": 69287,
+      "bytesBySecond": [
+        [
+          0,
+          69287
+        ],
+        [
+          1,
+          18
+        ],
+        [
+          2,
+          18
+        ],
+        [
+          3,
+          18
+        ],
+        [
+          4,
+          18
+        ],
+        [
+          5,
+          18
+        ],
+        [
+          6,
+          18
+        ],
+        [
+          7,
+          18
+        ],
+        [
+          8,
+          18
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          10,
+          9
+        ],
+        [
+          11,
+          18
+        ],
+        [
+          12,
+          18
+        ],
+        [
+          13,
+          18
+        ],
+        [
+          14,
+          18
+        ],
+        [
+          15,
+          18
+        ],
+        [
+          16,
+          18
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          18,
+          18
+        ],
+        [
+          19,
+          18
+        ]
+      ],
+      "maxReportedQueue": 657,
+      "firstValid": {
+        "seconds": 0.122042,
+        "frame": "D059040."
+      },
+      "lastValid": {
+        "seconds": 19.855223,
+        "frame": "D058940."
+      },
+      "invalidFrames": [
+        {
+          "seconds": 0.121926,
+          "bytes": 3568,
+          "hexPrefix": "40f840f840f840f840f840f840f840f840f840f840f840f8"
+        }
+      ],
+      "afterFirstSecond": {
+        "frameCount": 37,
+        "maxGapSeconds": 0.52,
+        "distinctFrames": [
+          [
+            "D059040.",
+            27
+          ],
+          [
+            "@059020.",
+            1
+          ],
+          [
+            "@058980.",
+            1
+          ],
+          [
+            "@058960.",
+            1
+          ],
+          [
+            "@058940.",
+            1
+          ],
+          [
+            "D058940.",
+            6
+          ]
+        ]
+      },
+      "partialTailHex": "",
+      "nativeErrors": [],
+      "settings": {
+        "baud": 9600,
+        "byte_size": 8,
+        "parity": 0,
+        "stop_bits": 0,
+        "flags": "0x11",
+        "dtr_control": 1,
+        "rts_control": 0
+      },
+      "queueAfterPurge": {
+        "error_mask": 0,
+        "in_queue": 0,
+        "out_queue": 0
+      }
+    }
+  ]
+}

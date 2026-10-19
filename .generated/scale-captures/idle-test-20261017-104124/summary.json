@@ -1,0 +1,14 @@
+{
+    "settings":  "COM3 9600 8N1; DTR on; RTS off; no handshake",
+    "idleStartedAt":  "2026-10-17T10:41:24.7863067-03:00",
+    "captureStartedAt":  "2026-10-17T10:42:24.8858481-03:00",
+    "endedAt":  "2026-10-17T10:42:40.1823662-03:00",
+    "durationSeconds":  15.119,
+    "totalBytes":  9172,
+    "chunks":  101,
+    "readTimeouts":  29,
+    "serialErrors":  [
+
+                     ],
+    "failure":  null
+}

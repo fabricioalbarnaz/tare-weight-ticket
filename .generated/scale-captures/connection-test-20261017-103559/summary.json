@@ -1,0 +1,57 @@
+{
+    "settings":  "COM3 9600 8N1; DTR on; RTS off; no handshake",
+    "phases":  [
+                   {
+                       "phase":  "continuous",
+                       "startedAt":  "2026-10-17T10:35:59.2656194-03:00",
+                       "endedAt":  "2026-10-17T10:37:29.6136408-03:00",
+                       "durationSeconds":  90.204,
+                       "totalBytes":  71935,
+                       "chunks":  2251,
+                       "readTimeouts":  173,
+                       "serialErrors":  [
+
+                                        ],
+                       "failure":  null
+                   },
+                   {
+                       "phase":  "reopen-1",
+                       "startedAt":  "2026-10-17T10:37:30.3594731-03:00",
+                       "endedAt":  "2026-10-17T10:37:40.4991880-03:00",
+                       "durationSeconds":  10.022,
+                       "totalBytes":  171,
+                       "chunks":  38,
+                       "readTimeouts":  20,
+                       "serialErrors":  [
+
+                                        ],
+                       "failure":  null
+                   },
+                   {
+                       "phase":  "reopen-2",
+                       "startedAt":  "2026-10-17T10:37:41.2358637-03:00",
+                       "endedAt":  "2026-10-17T10:37:51.4128908-03:00",
+                       "durationSeconds":  10.057,
+                       "totalBytes":  171,
+                       "chunks":  38,
+                       "readTimeouts":  20,
+                       "serialErrors":  [
+
+                                        ],
+                       "failure":  null
+                   },
+                   {
+                       "phase":  "reopen-3",
+                       "startedAt":  "2026-10-17T10:37:52.1331974-03:00",
+                       "endedAt":  "2026-10-17T10:38:02.3186108-03:00",
+                       "durationSeconds":  10.069,
+                       "totalBytes":  171,
+                       "chunks":  38,
+                       "readTimeouts":  20,
+                       "serialErrors":  [
+
+                                        ],
+                       "failure":  null
+                   }
+               ]
+}

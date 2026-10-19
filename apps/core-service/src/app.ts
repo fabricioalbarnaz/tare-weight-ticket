@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import multipart from '@fastify/multipart';
 import type { Db } from './db/client.js';
 import { createTicketRepository } from './tickets/repository.js';
 import { createSessionService } from './tickets/session-service.js';
@@ -25,6 +26,13 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   const repo = createTicketRepository(options.db);
   const sessionService = createSessionService(repo);
   const printService = createPrintService(repo, options.printClient);
+
+  // Generous fileSize limit: the camera's ANPR push carries three JPEGs
+  // alongside the anpr.xml part this system actually reads (see
+  // docs/plans master plan §7 item 3) — they're drained and discarded,
+  // but the limit still needs to be big enough that draining a real JPEG
+  // never errors.
+  app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   app.get('/health', async () => ({ status: 'ok' }));
 

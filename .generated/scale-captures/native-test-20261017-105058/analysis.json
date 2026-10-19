@@ -1,0 +1,221 @@
+{
+  "limitation": "First-second exclusion is diagnostic only; startup freshness is unproven.",
+  "results": [
+    {
+      "phase": "initial",
+      "durationSeconds": 10.056,
+      "totalBytes": 172,
+      "firstSecondBytes": 18,
+      "bytesBySecond": [
+        [
+          0,
+          18
+        ],
+        [
+          1,
+          18
+        ],
+        [
+          2,
+          18
+        ],
+        [
+          3,
+          18
+        ],
+        [
+          4,
+          18
+        ],
+        [
+          5,
+          18
+        ],
+        [
+          6,
+          18
+        ],
+        [
+          7,
+          18
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          10,
+          1
+        ]
+      ],
+      "firstValid": {
+        "seconds": 0.18458,
+        "frame": "F000000."
+      },
+      "lastValid": {
+        "seconds": 9.536513,
+        "frame": "F000000."
+      },
+      "invalidFrames": [],
+      "afterFirstSecond": {
+        "frameCount": 17,
+        "maxGapSeconds": 0.52,
+        "distinctFrames": [
+          [
+            "F000000.",
+            17
+          ]
+        ]
+      },
+      "partialTailHex": "46",
+      "nativeErrors": [],
+      "settings": {
+        "baud": 9600,
+        "byte_size": 8,
+        "parity": 0,
+        "stop_bits": 0,
+        "flags": "0x11",
+        "dtr_control": 1,
+        "rts_control": 0
+      },
+      "queueAfterPurge": {
+        "error_mask": 0,
+        "in_queue": 0,
+        "out_queue": 0
+      }
+    },
+    {
+      "phase": "after-idle",
+      "durationSeconds": 20.16,
+      "totalBytes": 81828,
+      "firstSecondBytes": 81495,
+      "bytesBySecond": [
+        [
+          0,
+          81495
+        ],
+        [
+          1,
+          18
+        ],
+        [
+          2,
+          18
+        ],
+        [
+          3,
+          18
+        ],
+        [
+          4,
+          18
+        ],
+        [
+          5,
+          18
+        ],
+        [
+          6,
+          18
+        ],
+        [
+          7,
+          18
+        ],
+        [
+          8,
+          18
+        ],
+        [
+          9,
+          18
+        ],
+        [
+          10,
+          9
+        ],
+        [
+          11,
+          18
+        ],
+        [
+          12,
+          18
+        ],
+        [
+          13,
+          18
+        ],
+        [
+          14,
+          18
+        ],
+        [
+          15,
+          18
+        ],
+        [
+          16,
+          18
+        ],
+        [
+          17,
+          18
+        ],
+        [
+          18,
+          18
+        ],
+        [
+          19,
+          18
+        ]
+      ],
+      "firstValid": {
+        "seconds": 0.120486,
+        "frame": "F000000."
+      },
+      "lastValid": {
+        "seconds": 19.855106,
+        "frame": "F000000."
+      },
+      "invalidFrames": [
+        {
+          "seconds": 0.120387,
+          "bytes": 15767,
+          "hexPrefix": "463030303030302e1d463030303030302e1d463030303030"
+        }
+      ],
+      "afterFirstSecond": {
+        "frameCount": 37,
+        "maxGapSeconds": 0.52,
+        "distinctFrames": [
+          [
+            "F000000.",
+            37
+          ]
+        ]
+      },
+      "partialTailHex": "",
+      "nativeErrors": [],
+      "settings": {
+        "baud": 9600,
+        "byte_size": 8,
+        "parity": 0,
+        "stop_bits": 0,
+        "flags": "0x11",
+        "dtr_control": 1,
+        "rts_control": 0
+      },
+      "queueAfterPurge": {
+        "error_mask": 0,
+        "in_queue": 0,
+        "out_queue": 0
+      }
+    }
+  ]
+}
