@@ -2,7 +2,7 @@
 
 Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
-Status: **Approved — Phases 0–6 merged (PR #1–#4): domain core, scale/camera integration, driver-signal relay, print bridge, and the Admin UI (frontend + backend admin API). The real Hikvision ANPR camera payload (§7 item 3) is also implemented and merged (PR #5), alongside field diagnostics for the Digi-Tron Isis New scale protocol (§7 item 2 — still unresolved, see the runbook). Printer transport (`usbipd-win` spike) and driver-signal relay hardware remain deferred to the on-site deployment phase — see §7.**
+Status: **Approved — Phases 0–6 merged (PR #1–#4): domain core, scale/camera integration, driver-signal relay, print bridge, and the Admin UI (frontend + backend admin API). The real Hikvision ANPR camera payload (§7 item 3) is also implemented and merged (PR #5). A first provisional version of the real Digi-Tron Isis New scale integration (§7 item 2) is implemented in this working tree, pending review — see §11 and `docs/plans/2026-10-20-isis-new-scale-integration-plan.md`; it is not a production sign-off (byte semantics unconfirmed by the vendor). Printer transport (`usbipd-win` spike) and driver-signal relay hardware remain deferred to the on-site deployment phase — see §7.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -214,7 +214,7 @@ the Admin UI for context.
 | Web/API framework | Fastify | Lightweight, first-class schema validation (useful for untrusted camera webhook payloads), fast |
 | DB | SQLite (`better-sqlite3`) + Drizzle ORM for schema/migrations | Zero ops, single-writer is fine at 200 trucks/day, file-based (trivial backup), typed queries |
 | Admin UI | React + Vite + TypeScript, Tailwind for styling | Small SPA is enough; built assets served by the Core Service, no separate hosting |
-| Scale integration | Custom TCP client (`net` module) with a parser for the Isis New protocol frames | Direct dependency-free integration; protocol confirmed against vendor manual in Phase 2 spike |
+| Scale integration | `core-service`: custom TCP client (`net` module) + DGN frame parser. `apps/scale-bridge`: native process (outside Docker, like the print bridge) using `serialport` to own the physical COM port, relaying raw bytes to `core-service` over TCP | Keeps `core-service`'s TCP-client abstraction unchanged; isolates the one native serial dependency in a small native process, same tradeoff already accepted for the print bridge's USB access |
 | Camera integration | Fastify HTTP routes + JSON schema validation | Matches "camera pushes webhook" model |
 | Printer | ESC/POS raw command generation (`node-thermal-printer` or hand-rolled minimal ESC/POS buffer) via the Print Bridge | Simple, no vendor SDK lock-in |
 | Driver signal | Small internal adapter interface, default HTTP relay call | Keeps hardware swap low-risk |
@@ -232,6 +232,7 @@ tare-weight-ticket/
     core-service/        # Fastify API, scale/camera integration, session logic, serves admin UI build
     admin-ui/             # React/Vite SPA
     print-bridge/         # native Windows process (or usbipd-win container variant)
+    scale-bridge/          # native Windows process relaying the Isis New COM port over TCP (added 2026-10-20)
   packages/
     shared/                # shared TS types/schemas (ticket, events, config)
   docker/
@@ -287,13 +288,26 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    RS-232 access are now available. Standalone Windows captures using an FTDI
    USB-RS-232 adapter matched the indicator at 9600 8N1 with DTR enabled.
    Serial DGN continuous acquisition is the field-tested direction for this
-   installation; the application still uses the placeholder TCP client.
-   Opening bursts, fresh-sample guarantees, exact DGN status flags, and the
-   Windows/Docker deployment boundary remain unresolved. See
-   [the setup and field findings runbook](../runbooks/isis-new-serial-setup.md)
-   before implementing the serial transport. This update supersedes the earlier
-   statement that no scale manual or hardware access is available, but does not
-   establish a real TCP protocol or production acceptance.
+   installation. Opening bursts, fresh-sample guarantees, exact DGN status
+   flags, and the Windows/Docker deployment boundary remain unresolved. See
+   [the setup and field findings runbook](../runbooks/isis-new-serial-setup.md).
+   This update supersedes the earlier statement that no scale manual or
+   hardware access is available, but does not establish a vendor-confirmed
+   TCP/serial protocol.
+   **Implemented as a provisional first version (2026-10-20):** the
+   placeholder TCP parser is replaced by a real `dgn-frame-parser.ts`, and a
+   new native `apps/scale-bridge` app (same outside-Docker placement as
+   `apps/print-bridge`, for the same USB/COM-port-from-Docker-on-Windows
+   reason) relays the physical COM port to `core-service` over TCP — see
+   §11 for the decisions made and
+   `docs/plans/2026-10-20-isis-new-scale-integration-plan.md` for the
+   implementation plan. This closes the "introduce a serial transport"
+   requirement from the runbook, but the state-byte semantics and the
+   burst-guard timing remain explicit **provisional assumptions**, not a
+   vendor-confirmed DGN spec — the runbook's on-site validation checklist
+   (cold boot, PC reboot, known-good adapter, DIGI-TRON's own spec) is still
+   open. Do not treat this as production acceptance for unattended ticket
+   issuance.
 3. **Camera model/webhook payload format — confirmed 2026-10-15.** The
    camera hardware is a Hikvision ANPR unit (`iDS-2CD7A46G0/P-IZHS` family)
    pushing events via the ISAPI `Event/notification/httpHosts` mechanism.
@@ -651,3 +665,42 @@ merge per `CLAUDE.md`):
   built in Phases 2–3 held exactly as intended** — `session-service.ts`
   needed zero changes; only the camera-specific files and the webhook
   routes' multipart handling changed.
+
+Decisions and lessons from the Isis New scale integration, first
+provisional version (plan:
+`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`, deleted after
+merge per `CLAUDE.md`):
+
+- **State-byte semantics are a documented provisional assumption, not a
+  vendor-confirmed DGN spec**: `D`/`F` are treated as candidate-stable,
+  `@` as explicitly unstable, and **any other/unrecognized byte as
+  not-stable (fail-safe)** — never guessed at. See the runbook for the full
+  rationale and the still-open validation checklist.
+- **One rule does double duty as both the per-truck stability wait and the
+  opening-burst guard**: a weight counts only once 3 consecutive matching
+  candidate readings have been seen, each spaced >= 2000ms apart from the
+  previously counted one (configurable). Because every opening-burst
+  capture in the runbook measured its anomalous volume as concentrated
+  within the first ~1 second, this single spacing rule keeps the burst's
+  thousands of rapid, syntactically-valid repeated frames from ever
+  satisfying the match count — no separate "discard window" logic was
+  needed. All of this lives in the new `dgn-frame-parser.ts`; per the
+  existing Phase 2–3 design note, swapping the real parser in required
+  zero changes to `tcp-client.ts` or anything downstream of it.
+- **The transport-boundary decision mirrors the print bridge exactly**: a
+  new native `apps/scale-bridge` app (outside Docker, same reason — USB/
+  COM-port access from Docker on Windows is unreliable) owns the physical
+  COM port via the `serialport` package (the one realistic way to reach a
+  real serial port from Node; no pure-JS alternative exists, a deliberate
+  exception to the "prefer pure-JS" guidance, same category as
+  `better-sqlite3`) and relays raw bytes verbatim over a plain TCP socket.
+  `core-service`'s `SCALE_HOST`/`SCALE_PORT` just point at the bridge
+  instead of a mock — no structural change to `ScaleClient`.
+- **Hardware status needed no new wiring**: `ScaleClient.getStatus()`
+  already reflected the TCP connection state to whatever `SCALE_HOST`/
+  `SCALE_PORT` point at, so `GET /api/admin/status`'s `scale` field now
+  correctly reflects the bridge connection with zero changes. Distinguishing
+  "bridge unreachable" from "bridge up but COM port/indicator not
+  responding" (the bridge's own `/health` carries `serialOpen` for this)
+  was deliberately left out of this first version — flagged as a Phase 8
+  hardening follow-up, not implemented now.

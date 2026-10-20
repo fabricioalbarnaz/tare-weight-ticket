@@ -8,6 +8,8 @@ describe('loadScaleConfig', () => {
       port: 9000,
       stabilityTimeoutMs: 15000,
       connectTimeoutMs: 5000,
+      stabilityReadingCount: 3,
+      stabilitySampleIntervalMs: 2000,
     });
   });
 
@@ -18,12 +20,16 @@ describe('loadScaleConfig', () => {
         SCALE_PORT: '4001',
         SCALE_STABILITY_TIMEOUT_MS: '20000',
         SCALE_CONNECT_TIMEOUT_MS: '3000',
+        SCALE_STABILITY_READING_COUNT: '5',
+        SCALE_STABILITY_SAMPLE_INTERVAL_MS: '1000',
       }),
     ).toEqual({
       host: '10.0.0.5',
       port: 4001,
       stabilityTimeoutMs: 20000,
       connectTimeoutMs: 3000,
+      stabilityReadingCount: 5,
+      stabilitySampleIntervalMs: 1000,
     });
   });
 

@@ -19,6 +19,10 @@ full development plan and any in-progress feature plans.
 
 For Windows driver setup, serial capture procedures, field findings, and remaining
 scale validation, see the [Isis New serial setup runbook](docs/runbooks/isis-new-serial-setup.md).
+`apps/scale-bridge` is the native process (outside Docker, like the print
+bridge) that owns the physical COM port and relays it to `core-service`;
+run it with `npm run dev --workspace=@tare/scale-bridge` once
+`SCALE_BRIDGE_COM_PORT` is set.
 
 ## Development
 

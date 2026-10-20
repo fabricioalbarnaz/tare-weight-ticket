@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { createDb } from './db/client.js';
-import { createPlaceholderFrameParser } from './scale/placeholder-frame-parser.js';
+import { createDgnFrameParser } from './scale/dgn-frame-parser.js';
 import { createTcpScaleClient } from './scale/tcp-client.js';
 import { loadScaleConfig } from './scale/config.js';
 import { createHttpRelayDriverSignalAdapter } from './driver-signal/http-relay-adapter.js';
@@ -20,7 +20,11 @@ const scaleClient = createTcpScaleClient({
   port: scaleConfig.port,
   stabilityTimeoutMs: scaleConfig.stabilityTimeoutMs,
   connectTimeoutMs: scaleConfig.connectTimeoutMs,
-  createParser: createPlaceholderFrameParser,
+  createParser: () =>
+    createDgnFrameParser({
+      requiredMatches: scaleConfig.stabilityReadingCount,
+      sampleIntervalMs: scaleConfig.stabilitySampleIntervalMs,
+    }),
 });
 
 const driverSignalConfig = loadDriverSignalConfig();

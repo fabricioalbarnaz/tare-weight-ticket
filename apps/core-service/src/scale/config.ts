@@ -5,6 +5,10 @@ export interface ScaleConfig {
   port: number;
   stabilityTimeoutMs: number;
   connectTimeoutMs: number;
+  /** Consecutive matching, spaced-apart DGN readings required before a weight counts as stable (see dgn-frame-parser.ts). */
+  stabilityReadingCount: number;
+  /** Minimum time (ms) between two DGN readings that both count toward that streak. */
+  stabilitySampleIntervalMs: number;
 }
 
 export function loadScaleConfig(env: NodeJS.ProcessEnv = process.env): ScaleConfig {
@@ -17,5 +21,15 @@ export function loadScaleConfig(env: NodeJS.ProcessEnv = process.env): ScaleConf
       15000,
     ),
     connectTimeoutMs: parsePositiveInt('SCALE_CONNECT_TIMEOUT_MS', env.SCALE_CONNECT_TIMEOUT_MS, 5000),
+    stabilityReadingCount: parsePositiveInt(
+      'SCALE_STABILITY_READING_COUNT',
+      env.SCALE_STABILITY_READING_COUNT,
+      3,
+    ),
+    stabilitySampleIntervalMs: parsePositiveInt(
+      'SCALE_STABILITY_SAMPLE_INTERVAL_MS',
+      env.SCALE_STABILITY_SAMPLE_INTERVAL_MS,
+      2000,
+    ),
   };
 }

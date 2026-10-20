@@ -24,11 +24,16 @@ already in place for admin work (`ticketAuditLog`, `rawEvents`,
 `adminUsers`), and a session service (`src/tickets/session-service.ts`)
 implementing every business rule from the master plan's §5, all backed by
 real temp-file SQLite DBs in tests (no mocking the DB). `src/scale/` has a
-TCP client with stability-wait logic against a placeholder frame parser —
-still a placeholder: field diagnostics against the real Digi-Tron Isis New
-indicator are underway (see `docs/runbooks/isis-new-serial-setup.md`) but
-the opening-burst/freshness/DGN-status questions aren't resolved yet, so no
-real parser has been written (master plan §7). `src/camera/` has the
+TCP client with stability-wait logic now against a **real** (but explicitly
+provisional) `dgn-frame-parser.ts` for the Digi-Tron Isis New's DGN serial
+protocol — see `docs/runbooks/isis-new-serial-setup.md` and
+`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`; the state-byte
+semantics and the stability/burst-guard rule are documented assumptions,
+not a vendor-confirmed spec (master plan §7, §11). A new native
+`apps/scale-bridge` app (outside Docker, same placement as `print-bridge`)
+owns the physical COM port and relays it to `core-service` over TCP via
+the `serialport` package — `core-service`'s TCP client/`SCALE_HOST`/
+`SCALE_PORT` just point at it, unchanged structurally. `src/camera/` has the
 entrance/exit webhook routes against the **real** Hikvision ANPR
 `multipart/form-data` + `anpr.xml` payload (confirmed vendor format,
 swapped in from the earlier generic JSON placeholder — master plan §7 item
@@ -43,13 +48,16 @@ manual reprint via `POST /tickets/:id/reprint`). The wire contract between
 the two apps lives in `packages/shared`.
 
 **Decision (2026-10-13):** finishing the remaining real hardware
-integrations (scale protocol, relay hardware) is deferred to Phase 7
-(per-PC deployment), done on-site once we have physical access to the
-equipment — see master plan §7. Don't treat the scale placeholder as a bug
-to fix now; it's intentionally parked pending the field diagnostics above.
-The camera payload item of that same decision is **no longer deferred** —
-it was implemented and merged once the real vendor format was confirmed
-(PR #5, 2026-10-19), ahead of Phase 7, per the master plan §7 update.
+integrations (relay hardware) is deferred to Phase 7 (per-PC deployment),
+done on-site once we have physical access to the equipment — see master
+plan §7. The camera payload and scale protocol items of that same decision
+are **no longer deferred** — camera was implemented and merged once the
+real vendor format was confirmed (PR #5, 2026-10-19); the scale protocol
+now has a first provisional implementation (2026-10-20, pending review —
+see above), both ahead of Phase 7, per the master plan §7 update. The
+scale work is explicitly **not** a production sign-off (byte semantics
+unconfirmed by DIGI-TRON) — the on-site validation checklist in the
+runbook is still open.
 
 Phase 6 (Admin UI) is fully merged: the **frontend** (`apps/admin-ui`:
 React/Vite SPA, auth, dashboard, manual edit/create/reprint flows with

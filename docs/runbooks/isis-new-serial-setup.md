@@ -8,10 +8,19 @@ PC and to continue validation. Numeric readings matched the indicator, and
 continuous reception worked with DTR enabled. An unresolved burst on opening
 means that a well-formed message alone is not sufficient to accept a live weight.
 
-The EixoLink application still uses its placeholder TCP scale integration.
-These were standalone diagnostics, not an installation of production serial
-support. No indicator calibration, zero, tare, filter, or firmware changes were
-made. Readers sent no application commands to the indicator.
+**Implemented as a provisional first version (2026-10-20)**, per
+`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`: a real
+`dgn-frame-parser.ts` in `core-service` and a native `apps/scale-bridge`
+process that owns the physical COM port and relays it to `core-service`
+over TCP (mirroring `apps/print-bridge`'s native, outside-Docker
+placement). The state-byte semantics and the stability/burst-guard rule
+below are implemented exactly as documented here, as explicit **provisional
+assumptions** — this is not a vendor-confirmed DGN spec or a production
+sign-off. The on-site validation checklist near the end of this document
+(cold boot, PC reboot, known-good adapter comparison, DIGI-TRON's own DGN
+spec) is still open. No indicator calibration, zero, tare, filter, or
+firmware changes were made during the diagnostics that produced the
+evidence below. Readers sent no application commands to the indicator.
 
 ## Equipment and source documents
 
@@ -288,32 +297,47 @@ validation alone cannot reject valid-looking old or repeated messages.
 
 ## Direction for EixoLink development
 
-Use serial DGN continuous acquisition as the **field-tested integration direction**
-for this installation. Keep these implementation requirements explicit:
+Serial DGN continuous acquisition was the **field-tested integration direction**
+for this installation, and is now implemented as a provisional first version.
+How each requirement below was addressed:
 
-- Introduce a serial transport behind the existing `ScaleClient` abstraction;
-  the current `SCALE_HOST`/`SCALE_PORT` settings and placeholder TCP parser do
-  not provide COM-port support. Serial configuration names are not implemented yet.
-- Keep receiving continuously and serialize logical weighing requests. Opening
-  the port for every truck has not been validated as a reliable design.
-- Start each request from demonstrably fresh, complete data. Preserve receive
-  timestamps, bound frame buffers, reject malformed/unsupported states, and
-  invalidate pending data after disconnects or resets.
-- Confirm hardware stability semantics, then define a configurable observation
-  window. Five seconds is a proposed starting point, not a field-validated rule.
-  Evaluate all frames in the window, not just two equal endpoint values.
-- Bound the time without new frames and total capture time. Silence must not
-  make the previous weight appear stable. On uncertainty, return capture failure
-  rather than a plausible but unverified weight.
-- Preserve the indicator's value; do not add averaging, rounding, or inferred
-  unit conversion. Confirm gross/net semantics before ticket use.
-- Retain diagnostic evidence. For Windows serial access and the current Docker
-  architecture, deployment of the eventual reader still requires a design
-  decision; standalone Windows diagnostics do not validate container USB access.
+- **Serial transport behind the existing `ScaleClient` abstraction**: done via
+  `apps/scale-bridge` (native, outside Docker) relaying the COM port over TCP;
+  `core-service`'s `SCALE_HOST`/`SCALE_PORT` point at the bridge, and
+  `apps/core-service/src/scale/dgn-frame-parser.ts` replaces the placeholder
+  parser. Nothing else in `tcp-client.ts` changed.
+- **Continuous reception, serialized requests**: unchanged — `ScaleClient`
+  already kept one persistent connection open across reads; `scale-bridge`
+  keeps the COM port open for the life of the process the same way, so the
+  opening burst is only ever encountered at bridge start/reconnect, not per
+  truck.
+- **Fresh, complete data only**: addressed by the stability rule below, not
+  by a separate freshness check — see its rationale.
+- **Stability semantics and observation window**: implemented as `D`/`F` =
+  candidate-stable, `@` = explicitly unstable, **any other/unrecognized byte
+  = not-stable (fail-safe)** — never guessed at. The "five-second window" idea
+  was replaced by: a weight counts only once 3 consecutive matching candidate
+  readings have been seen, each spaced >= 2000ms apart (both configurable via
+  `SCALE_STABILITY_READING_COUNT`/`SCALE_STABILITY_SAMPLE_INTERVAL_MS`). This
+  single rule also doubles as the burst guard: every capture in this document
+  measured the anomalous volume as concentrated within the first ~1 second
+  after opening, so a 2000ms minimum spacing between *counted* readings means
+  thousands of rapid, syntactically-valid repeated frames (e.g. `D059040.` ×
+  7330 in one capture) can never satisfy 3 counted matches that fast — only
+  readings genuinely separated in time after the burst subsides can. This is
+  still a documented assumption, not a guarantee: only idle intervals up to
+  60 seconds were tested; cold boot and PC reboot remain open below.
+- **Malformed/unsupported states rejected, pending data invalidated on
+  reconnect**: the parser discards any byte sequence not matching the
+  observed 8-byte shape and resyncs on the next frame delimiter rather than
+  throwing or desyncing permanently; a fresh connection starts its stability
+  streak from zero.
+- **Preserve the indicator's value as-is**: no averaging, rounding, or unit
+  conversion was added. Gross/net semantics are still unconfirmed — see below.
 
-These are requirements for the next implementation plan, not completed features.
-Continue development with explicit provisional assumptions; do not describe this
-session as production acceptance for unattended ticket issuance.
+Treat all of the above as explicit provisional assumptions, not production
+acceptance for unattended ticket issuance, until the open items in the next
+section are resolved.
 
 ## Validation to resume on site
 
@@ -364,6 +388,8 @@ details with the deployment handover; do not assume a fresh checkout includes
 them. Early exploratory console-only captures have no equivalent saved archive.
 
 The active [validation plan](../plans/2026-10-17-serial-capture-validation-plan.md)
-tracks remaining work. Native collector references:
+tracks remaining diagnostic work; the
+[integration plan](../plans/2026-10-20-isis-new-scale-integration-plan.md)
+tracks the implementation summarized above. Native collector references:
 [DCB settings](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-dcb)
 and [serial timeouts](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-commtimeouts).
