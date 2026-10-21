@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Phases 0–6 are complete and merged into `main`: PR #1 (Phase 0 scaffolding +
 Phase 1 domain core), PR #2 (Phases 2–5 together: scale TCP integration,
 camera webhooks, driver-signal relay adapter, and the print bridge), PR #3
-(Phase 6 Admin UI frontend), PR #4 (Phase 6 admin backend API), and PR #5
+(Phase 6 Admin UI frontend), PR #4 (Phase 6 admin backend API), PR #5
 (real Hikvision ANPR camera payload + Isis New scale serial field
-diagnostics/docs). See the
+diagnostics/docs), a first provisional Isis New DGN scale integration, and
+the software-only half of Phase 7 packaging prep — all three committed
+directly to `main` (2026-10-20, no PR). See the
 master plan's §11 "Implementation notes from completed phases" for the
 design decisions made along the way (most notably: `entryAt` is nullable to
 support `ANOMALY` tickets created from an exit-without-entrance event, scale
@@ -26,8 +28,8 @@ implementing every business rule from the master plan's §5, all backed by
 real temp-file SQLite DBs in tests (no mocking the DB). `src/scale/` has a
 TCP client with stability-wait logic now against a **real** (but explicitly
 provisional) `dgn-frame-parser.ts` for the Digi-Tron Isis New's DGN serial
-protocol — see `docs/runbooks/isis-new-serial-setup.md` and
-`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`; the state-byte
+protocol — see `docs/runbooks/isis-new-serial-setup.md` and the master
+plan's §11; the state-byte
 semantics and the stability/burst-guard rule are documented assumptions,
 not a vendor-confirmed spec (master plan §7, §11). A new native
 `apps/scale-bridge` app (outside Docker, same placement as `print-bridge`)
@@ -53,11 +55,23 @@ done on-site once we have physical access to the equipment — see master
 plan §7. The camera payload and scale protocol items of that same decision
 are **no longer deferred** — camera was implemented and merged once the
 real vendor format was confirmed (PR #5, 2026-10-19); the scale protocol
-now has a first provisional implementation (2026-10-20, pending review —
-see above), both ahead of Phase 7, per the master plan §7 update. The
+now has a first provisional implementation (2026-10-20, merged into
+`main`), both ahead of Phase 7, per the master plan §7 update. The
 scale work is explicitly **not** a production sign-off (byte semantics
 unconfirmed by DIGI-TRON) — the on-site validation checklist in the
 runbook is still open.
+
+**Phase 7 packaging prep (2026-10-20):** the half of Phase 7 that doesn't
+need the definitive PC is also done ahead of schedule — Core Service now
+actually serves the Admin UI static build (it never did before, despite
+that being the documented architecture since Phase 0), `docker/docker-compose.yml`
+is finalized for production (`restart: always`, a healthcheck, a required
+`.env`), `scripts/windows-service-*.ps1` register `print-bridge`/
+`scale-bridge` as auto-starting/auto-restarting Windows services via NSSM,
+and `docs/runbooks/per-pc-deployment.md` walks through the install with
+every still-hardware-dependent value (COM port, camera IPs, relay
+hardware) flagged as an explicit on-site placeholder. See master plan §9
+and §11.
 
 Phase 6 (Admin UI) is fully merged: the **frontend** (`apps/admin-ui`:
 React/Vite SPA, auth, dashboard, manual edit/create/reprint flows with
@@ -163,15 +177,41 @@ repo, the `@tare/*` packages, file paths, or Docker images to match.
 - The user handles all commits and PRs themselves — never run `git commit`
   or open a PR. Instead, after each deliverable, suggest a small commit
   message and a PR description for the user to use.
-- **Local `npm install`/`npm run build|test|lint|typecheck` do not work
-  directly on this Windows dev machine**: there's no working Python
-  toolchain for node-gyp, which `better-sqlite3`'s native build needs (and
-  would need for any other native dependency — avoid adding one; prefer a
-  pure-JS alternative as was done for password hashing, `bcryptjs` instead
-  of `bcrypt`). Verify changes instead via a throwaway Linux container,
-  matching how `docker/Dockerfile.core-service` already handles this native
-  build: `docker run --rm -v "$(pwd):/app" -w /app node:24-alpine sh -c
-  "apk add --no-cache python3 make g++ && npm install && <command>"` (on
-  Windows Git Bash, prefix with `MSYS_NO_PATHCONV=1` so `-w /app` isn't
-  mangled into a Windows path). This also regenerates `package-lock.json`
-  correctly when dependencies change.
+- **Verify each workspace in the environment it actually runs in
+  production, not uniformly** (updated 2026-10-21 — a native, non-container
+  `npm install` now works on Windows dev machines, confirmed on more than
+  one, resolving `better-sqlite3`/`@serialport/bindings-cpp` via prebuilt
+  binaries with no Python/node-gyp toolchain needed; the previous blanket
+  "local install doesn't work" note is outdated):
+  - **`core-service` and `admin-ui` ship inside the Docker image**
+    (`docker/Dockerfile.core-service` builds both and the container serves
+    the result) — the Linux Alpine container is still the *authoritative*
+    verification for these two, since that's literally the artifact that
+    runs in production. Native Windows runs of their lint/typecheck/test
+    are a fine quick sanity check, but verify any change touching them
+    (and always re-verify before considering packaging/Docker work done)
+    via: `docker run --rm -v "$(pwd):/app" -w /app node:24-alpine sh -c
+    "apk add --no-cache python3 make g++ && npm install && <command>"` (on
+    Windows Git Bash, prefix with `MSYS_NO_PATHCONV=1` so `-w /app` isn't
+    mangled into a Windows path). This also regenerates `package-lock.json`
+    correctly when dependencies change. Still prefer a pure-JS dependency
+    over a native one for these two apps where reasonable (as was done for
+    password hashing, `bcryptjs` instead of `bcrypt`) — a native dep adds
+    an Alpine toolchain requirement to the image build, not because local
+    verification is blocked anymore.
+  - **`print-bridge` and `scale-bridge` are native Windows processes**,
+    installed via NSSM and never containerized (USB/COM-port access from
+    Docker on Windows is unreliable — see master plan §4.5/§11). For these
+    two, verify natively on Windows directly (`npm install`, then
+    `npm run build|test --workspace=@tare/print-bridge` /
+    `@tare/scale-bridge`) — that now matches their real production runtime
+    better than the Alpine container ever did, since the container's
+    `serialport` binary is a Linux/musl build that's never the one actually
+    shipped.
+  - **Don't mix the two without a clean reinstall**: switching a shared
+    root `node_modules` between a native Windows install and a container
+    install corrupts `node_modules/.bin/*` shims for the other environment
+    (symptom: `node.exe: not found` inside the container, or
+    `'<tool>' não é reconhecido` natively). If you've just run one and need
+    the other, delete `node_modules` everywhere first and reinstall clean
+    in the target environment.

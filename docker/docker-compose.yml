@@ -1,9 +1,19 @@
+# Production compose for Core Service. Deliberately covers only the
+# containerized side — `apps/print-bridge` and `apps/scale-bridge` are
+# native Windows processes (USB/COM-port access from Docker on Windows is
+# unreliable) and run outside this file; see
+# docs/runbooks/per-pc-deployment.md for how they're installed and
+# auto-started alongside this.
 services:
   core-service:
     build:
       context: ..
       dockerfile: docker/Dockerfile.core-service
-    restart: unless-stopped
+    # Not `unless-stopped`: this must come back up unattended after a crash
+    # or a power-cycle even if the container's last observed state was
+    # "stopped" (e.g. mid-restart when power was lost) — see master plan
+    # §7 item 6.
+    restart: always
     ports:
       - '${PORT:-3000}:3000'
     environment:
@@ -11,6 +21,19 @@ services:
       DB_PATH: /app/data/tare.sqlite
     volumes:
       - ../data:/app/data
+    # Required, not optional: ADMIN_SESSION_SECRET (and in a real install,
+    # SCALE_HOST/PORT pointing at apps/scale-bridge) have no safe default.
+    # Copy .env.example to ../.env and fill it in before `docker compose up`.
     env_file:
       - path: ../.env
-        required: false
+        required: true
+    healthcheck:
+      # 127.0.0.1, not localhost: Alpine resolves "localhost" to ::1 first,
+      # and the app only listens on 0.0.0.0 (IPv4) — wget would otherwise
+      # get a spurious "connection refused" and the container would never
+      # report healthy.
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://127.0.0.1:3000/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

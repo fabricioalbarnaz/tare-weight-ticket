@@ -5,6 +5,7 @@ WORKDIR /app
 FROM base AS deps
 COPY package.json package-lock.json ./
 COPY apps/core-service/package.json apps/core-service/package.json
+COPY apps/admin-ui/package.json apps/admin-ui/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN apk add --no-cache python3 make g++
 RUN npm ci
@@ -13,8 +14,14 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/core-service apps/core-service
+COPY apps/admin-ui apps/admin-ui
 RUN npm run build --workspace=@tare/shared
 RUN npm run build --workspace=@tare/core-service
+# VITE_API_MODE must be "proxy" at build time — Vite inlines
+# import.meta.env.VITE_API_MODE into the bundle, and the admin-ui default
+# ("mock") would otherwise ship an MSW-fixture-only UI in production.
+ENV VITE_API_MODE=proxy
+RUN npm run build --workspace=@tare/admin-ui
 
 FROM base AS runtime
 ENV NODE_ENV=production
@@ -26,6 +33,7 @@ RUN npm prune --omit=dev
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/core-service/dist apps/core-service/dist
 COPY --from=build /app/apps/core-service/drizzle apps/core-service/drizzle
+COPY --from=build /app/apps/admin-ui/dist apps/admin-ui/dist
 
 ENV PORT=3000
 EXPOSE 3000

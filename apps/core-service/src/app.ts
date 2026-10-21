@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import type { Db } from './db/client.js';
 import { createTicketRepository } from './tickets/repository.js';
 import { createSessionService } from './tickets/session-service.js';
@@ -18,6 +19,14 @@ export interface BuildAppOptions {
   printClient: PrintClient;
   /** Signs the Admin UI's session cookie. Must be at least 32 characters. */
   adminSessionSecret: string;
+  /**
+   * Absolute path to the built Admin UI (`apps/admin-ui`'s `vite build`
+   * output). When set, Core Service serves it directly and falls back to
+   * `index.html` for unmatched GET routes (client-side routing). Omit to
+   * run the API only (e.g. local dev, where the Admin UI runs on its own
+   * Vite dev server).
+   */
+  adminUiDir?: string;
 }
 
 export function buildApp(options: BuildAppOptions): FastifyInstance {
@@ -53,6 +62,23 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     printClient: options.printClient,
     sessionSecret: options.adminSessionSecret,
   });
+
+  if (options.adminUiDir) {
+    const adminUiDir = options.adminUiDir;
+    app.register(fastifyStatic, { root: adminUiDir });
+
+    // Registered after every API route above, so it only ever catches
+    // genuinely unmatched requests — client-side routes like `/tickets/42`
+    // that the Admin UI's React Router handles, not `/api/*`, `/health`,
+    // `/webhooks/*`, or print routes, which are already real routes by now.
+    app.setNotFoundHandler((request, reply) => {
+      if (request.method === 'GET' && !request.url.startsWith('/api/')) {
+        reply.sendFile('index.html');
+        return;
+      }
+      reply.code(404).send({ error: 'not_found' });
+    });
+  }
 
   return app;
 }

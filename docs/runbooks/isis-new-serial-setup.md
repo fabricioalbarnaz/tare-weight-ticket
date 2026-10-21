@@ -8,9 +8,9 @@ PC and to continue validation. Numeric readings matched the indicator, and
 continuous reception worked with DTR enabled. An unresolved burst on opening
 means that a well-formed message alone is not sufficient to accept a live weight.
 
-**Implemented as a provisional first version (2026-10-20)**, per
-`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`: a real
-`dgn-frame-parser.ts` in `core-service` and a native `apps/scale-bridge`
+**Implemented as a provisional first version (2026-10-20)**, merged into
+`main`: a real `dgn-frame-parser.ts` in `core-service` and a native
+`apps/scale-bridge`
 process that owns the physical COM port and relays it to `core-service`
 over TCP (mirroring `apps/print-bridge`'s native, outside-Docker
 placement). The state-byte semantics and the stability/burst-guard rule
@@ -388,8 +388,8 @@ details with the deployment handover; do not assume a fresh checkout includes
 them. Early exploratory console-only captures have no equivalent saved archive.
 
 The active [validation plan](../plans/2026-10-17-serial-capture-validation-plan.md)
-tracks remaining diagnostic work; the
-[integration plan](../plans/2026-10-20-isis-new-scale-integration-plan.md)
-tracks the implementation summarized above. Native collector references:
+tracks remaining diagnostic work; the master plan's §11 covers the
+implementation summarized above (its per-feature plan was deleted after
+merge per `CLAUDE.md`). Native collector references:
 [DCB settings](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-dcb)
 and [serial timeouts](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-commtimeouts).

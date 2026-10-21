@@ -2,7 +2,7 @@
 
 Product name: EixoLink (chosen 2026-10-10; INPI/domain not yet checked).
 
-Status: **Approved — Phases 0–6 merged (PR #1–#4): domain core, scale/camera integration, driver-signal relay, print bridge, and the Admin UI (frontend + backend admin API). The real Hikvision ANPR camera payload (§7 item 3) is also implemented and merged (PR #5). A first provisional version of the real Digi-Tron Isis New scale integration (§7 item 2) is implemented in this working tree, pending review — see §11 and `docs/plans/2026-10-20-isis-new-scale-integration-plan.md`; it is not a production sign-off (byte semantics unconfirmed by the vendor). Printer transport (`usbipd-win` spike) and driver-signal relay hardware remain deferred to the on-site deployment phase — see §7.**
+Status: **Approved — Phases 0–6 merged (PR #1–#4): domain core, scale/camera integration, driver-signal relay, print bridge, and the Admin UI (frontend + backend admin API). The real Hikvision ANPR camera payload (§7 item 3) is also implemented and merged (PR #5). A first provisional version of the real Digi-Tron Isis New scale integration (§7 item 2) is implemented and merged into `main` — see §11; it is not a production sign-off (byte semantics unconfirmed by the vendor). Printer transport (`usbipd-win` spike) and driver-signal relay hardware remain deferred to the on-site deployment phase — see §7. The software-only half of Phase 7 (packaging/deployment prep that doesn't depend on the definitive PC) is also done — see §9 and §11.**
 Created: 2026-09-29
 
 ## 1. Purpose
@@ -299,9 +299,7 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    new native `apps/scale-bridge` app (same outside-Docker placement as
    `apps/print-bridge`, for the same USB/COM-port-from-Docker-on-Windows
    reason) relays the physical COM port to `core-service` over TCP — see
-   §11 for the decisions made and
-   `docs/plans/2026-10-20-isis-new-scale-integration-plan.md` for the
-   implementation plan. This closes the "introduce a serial transport"
+   §11 for the decisions made. This closes the "introduce a serial transport"
    requirement from the runbook, but the state-byte semantics and the
    burst-guard timing remain explicit **provisional assumptions**, not a
    vendor-confirmed DGN spec — the runbook's on-site validation checklist
@@ -369,11 +367,14 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
        exist. Leaning toward keeping the current per-endpoint approach — it
        doesn't depend on trusting the camera's own direction
        classification — unless a reason to change surfaces.
-     - Decide whether to persist the full `anpr.xml` (verbatim, or just the
-       `<ANPR>`/`PlateInfoList` subset) as `raw_events.raw_payload`, and
-       whether to store the three JPEGs at all — this stack has no object
-       storage today, so that would need a decision on local-disk
-       retention/rotation vs. discarding the images entirely on receipt.
+     - **Decided (2026-10-21): images are not stored at all** — only the
+       plate value (plus `cameraId`/`timestamp`) is kept. This matches
+       what was already implemented: `readAnprXmlPart` in
+       `src/camera/routes.ts` drains and discards the three JPEG parts,
+       and `recordRawEvent` only ever persists
+       `{ rawPlate, plate, cameraId, timestamp }` to `raw_events.raw_payload`
+       — never the full `anpr.xml` or any image bytes. No code change was
+       needed to close this decision, only confirming it as intentional.
      - `src/camera/payload-schema.ts`/`normalize.ts` stays the isolation
        boundary (per the existing Phase 2–3 design note in §11): only those
        files plus the route's content-type/parsing handling should need to
@@ -390,7 +391,8 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    assumption should be confirmed or replaced before Phase 5.
 5. **Admin auth strength**: username/password + session cookie is proposed
    as "enough" for a closed LAN. Confirm no stronger requirement (e.g. AD
-   integration) exists.
+   integration) exists. **Confirmed (2026-10-21):** username/password +
+   session cookie is sufficient for now — no AD/SSO integration planned.
 6. **Windows auto-start**: Docker Desktop must be configured to launch on
    boot and containers set to `restart: always`; the print bridge (if kept
    native) needs to run as a Windows service. This needs to be part of the
@@ -411,7 +413,8 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
 - **Admin UI**: component tests for the ticket table/edit forms; a handful
   of Playwright smoke tests for the critical manual-fix flow (edit weight →
   audit log entry appears → reprint works) — kept minimal, not exhaustive
-  E2E coverage.
+  E2E coverage. **Done (2026-10-21)**: `apps/admin-ui/e2e/manual-correction.spec.ts`
+  (against the MSW mock fixtures, same as local dev), wired into CI.
 - **CI gate**: lint + typecheck + unit + integration tests + docker build,
   required to merge.
 
@@ -447,6 +450,13 @@ runnable (even if incomplete) at the end of every phase.
   config, written install runbook for replicating to the 3 PCs. **Also
   where the deferred real hardware integrations (§7 decision above) get
   finished, on-site against the actual scale, camera, and relay.**
+  **The software/packaging half that doesn't depend on the definitive PC
+  is done (2026-10-20, see §11): Core Service now serves the Admin UI
+  static build, production `docker-compose.yml` is finalized, NSSM-based
+  Windows service scripts exist for the native apps, and
+  `docs/runbooks/per-pc-deployment.md` covers the install.** The hardware
+  half (real COM port, camera IPs, relay/printer hardware selection,
+  on-site validation) is still open and happens once the PC is available.
 - **Phase 8 — Hardening**: structured logging + rotation, reconnect/retry
   resilience for scale/camera/printer/relay outages, SQLite backup strategy,
   basic load validation at ~200+ tickets/day, security pass on the Admin UI
@@ -667,9 +677,9 @@ merge per `CLAUDE.md`):
   routes' multipart handling changed.
 
 Decisions and lessons from the Isis New scale integration, first
-provisional version (plan:
-`docs/plans/2026-10-20-isis-new-scale-integration-plan.md`, deleted after
-merge per `CLAUDE.md`):
+provisional version (committed directly to `main`, 2026-10-20, no PR; the
+per-feature plan, `docs/plans/2026-10-20-isis-new-scale-integration-plan.md`,
+is deleted after merge per `CLAUDE.md`):
 
 - **State-byte semantics are a documented provisional assumption, not a
   vendor-confirmed DGN spec**: `D`/`F` are treated as candidate-stable,
@@ -704,3 +714,77 @@ merge per `CLAUDE.md`):
   responding" (the bridge's own `/health` carries `serialOpen` for this)
   was deliberately left out of this first version — flagged as a Phase 8
   hardening follow-up, not implemented now.
+
+Decisions and lessons from Phase 7 packaging prep, the software-only half
+done ahead of the definitive PC (committed directly to `main`, 2026-10-20,
+no PR; the per-feature plan,
+`docs/plans/2026-10-20-phase7-packaging-prep-plan.md`, is deleted after
+merge per `CLAUDE.md`):
+
+- **Core Service never actually served the Admin UI build, despite that
+  being the documented architecture from Phase 0** — `Dockerfile.core-service`
+  never built or copied `apps/admin-ui`, and nothing registered static
+  file serving. This was a real gap, not a hardware unknown, closed now:
+  `@fastify/static` + a `setNotFoundHandler` SPA fallback in `app.ts`
+  (registered after every API route, so it only ever catches genuinely
+  unmatched GET requests — never `/api/*`), wired through an optional
+  `adminUiDir` that `server.ts` only enables if a real build is present
+  (keeps `npm run dev` working without one).
+- **`vite build`'s `VITE_API_MODE` is inlined at build time, not read at
+  runtime** — the admin-ui's own default (`mock`, MSW fixtures) would have
+  silently shipped as the production bundle if the Docker build hadn't
+  pinned `ENV VITE_API_MODE=proxy` before `vite build`. Caught and fixed
+  by actually building the image and inspecting the served bundle, not by
+  typecheck/lint alone.
+- **`ADMIN_SESSION_SECRET` was a required, no-default env var that
+  `.env.example` never documented** — anyone following the documented
+  setup (`cp .env.example .env`) would hit a startup crash with no clue
+  why. Caught the same way: running `docker compose up` for real, not just
+  validating `docker compose config`.
+- **`docker-compose.yml`'s healthcheck using `localhost` silently never
+  passed** — Alpine resolves `localhost` to `::1` first, and the app only
+  binds `0.0.0.0` (IPv4), so `wget` got "connection refused" and the
+  container sat in `starting` forever. Fixed by pointing the healthcheck
+  at `127.0.0.1` explicitly. Another case a syntax/config check alone
+  would have missed — only running the real container surfaced it.
+- **`restart: always` (not `unless-stopped`) and `env_file: required: true`
+  were both deliberate**: the former per the risk list's item 6 (must come
+  back up unattended even after an observed "stopped" state from a
+  power-cycle); the latter because `ADMIN_SESSION_SECRET` has no safe
+  default, so failing `docker compose up` immediately with a clear error
+  is better than a crash-looping container.
+- **`print-bridge`/`scale-bridge` read `process.env` directly, with no
+  `.env`-file loader of their own** — Windows-service env vars for them
+  are passed through NSSM's `AppEnvironmentExtra` (see
+  `scripts/windows-service-install.ps1`'s `-EnvVar` parameter), not via a
+  `.env` file like `core-service`'s Docker container uses. Two different
+  mechanisms for two different process models, both ending at the same
+  `process.env` contract the apps already expected.
+- **What still needs the real PC, left as explicit placeholders in
+  `docs/runbooks/per-pc-deployment.md`** rather than guessed at: the COM
+  port name, camera IP/admin access (their entrance/exit push targets are
+  configured on the cameras themselves, not in this repo's `.env`), and
+  driver-signal relay hardware (still unchosen). Actually registering the
+  NSSM services and Docker Desktop's sign-in behavior are on-site actions
+  too — the scripts were only syntax-checked (PowerShell AST parse), never
+  run, since that needs Administrator rights and a real machine.
+- **The "local npm install doesn't work" note was stale, and the fix is to
+  verify each workspace in its own production environment, not to pick one
+  environment for everything** (2026-10-21, confirmed reproducible on more
+  than one Windows machine, not a one-off): `better-sqlite3` and
+  `@serialport/bindings-cpp` both now resolve via prebuilt binaries on a
+  native Windows `npm install`, no Python/node-gyp toolchain needed. That
+  makes native Windows installs viable again, but which environment is
+  *authoritative* still depends on where each app actually runs in
+  production — `core-service`/`admin-ui` ship inside the Docker image, so
+  the Alpine container stays authoritative for them; `print-bridge`/
+  `scale-bridge` are native Windows processes that never run in Docker, so
+  native Windows verification is now the *more* correct choice for them,
+  not just a fallback — the container's `serialport` binary was always a
+  Linux/musl build, never the one actually shipped. See `CLAUDE.md`'s
+  updated development-workflow section. Mixing the two on one shared root
+  `node_modules` without a clean reinstall corrupts `node_modules/.bin/*`
+  shims for whichever environment ran second (caught when a native install
+  broke the following container-based `build`/`typecheck`/`lint` run with
+  `node.exe: not found`; fixed by wiping `node_modules` and reinstalling
+  clean inside the container).

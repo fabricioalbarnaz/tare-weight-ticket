@@ -26,5 +26,12 @@ jobs:
 
       - run: npm run test
 
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/admin-ui
+
+      - name: Admin UI E2E smoke tests
+        run: npm run test:e2e --workspace=@tare/admin-ui
+
       - name: Build core-service Docker image
         run: docker build -f docker/Dockerfile.core-service -t core-service:ci .

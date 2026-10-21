@@ -55,9 +55,27 @@ is also available via the language switcher in the header/login page. The
 in-app language choice is remembered per browser (`localStorage`) and
 independently also drives date/number formatting.
 
-## Docker
+A handful of Playwright smoke tests (`apps/admin-ui/e2e/`) cover the
+critical manual-fix flow against the MSW mock fixtures. One-time setup,
+then run:
 
 ```
+npx playwright install chromium --with-deps
+npm run test:e2e --workspace=@tare/admin-ui
+```
+
+## Docker
+
+`docker/docker-compose.yml` requires a `.env` file at the repo root (copy
+`.env.example` and fill it in — at minimum set a real `ADMIN_SESSION_SECRET`;
+`docker compose up` refuses to start without one):
+
+```
+cp .env.example .env
 docker compose -f docker/docker-compose.yml build
 docker compose -f docker/docker-compose.yml up
 ```
+
+This only runs `core-service`. `apps/print-bridge` and `apps/scale-bridge`
+are native Windows processes, started separately — see
+`docs/runbooks/per-pc-deployment.md`.
