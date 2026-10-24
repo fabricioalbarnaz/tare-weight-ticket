@@ -45,7 +45,7 @@ describe('POST /print', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ success: true });
     expect(transport.printedBytes).toHaveLength(1);
-    expect(transport.printedBytes[0]!.toString('ascii')).toContain('Plate: ABC1234');
+    expect(transport.printedBytes[0]!.toString('ascii')).toContain('Placa:  ABC1234');
   });
 
   it('rejects a payload missing a required field', async () => {

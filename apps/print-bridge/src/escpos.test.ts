@@ -24,14 +24,15 @@ describe('buildTicketEscPos', () => {
   it('includes the plate, ticket number, and weights as readable text', () => {
     const text = buildTicketEscPos(baseTicket).toString('ascii');
 
-    expect(text).toContain('Ticket #: 42');
-    expect(text).toContain('Plate: ABC1234');
-    expect(text).toContain('Entry weight: 20000 kg');
-    expect(text).toContain('Exit weight:  8000 kg');
-    expect(text).toContain('Net weight:   12000 kg');
+    expect(text).toContain('TICKET DE PESAGEM');
+    expect(text).toContain('Ticket: 42');
+    expect(text).toContain('Placa:  ABC1234');
+    expect(text).toContain('Peso entrada: 20000 kg');
+    expect(text).toContain('Peso saida:   8000 kg');
+    expect(text).toContain('Peso liquido: 12000 kg');
   });
 
-  it('renders N/A for missing weights and timestamps (e.g. a failed capture leg)', () => {
+  it('renders N/D for missing weights and timestamps (e.g. a failed capture leg)', () => {
     const text = buildTicketEscPos({
       ...baseTicket,
       exitAt: null,
@@ -39,8 +40,40 @@ describe('buildTicketEscPos', () => {
       netWeightKg: null,
     }).toString('ascii');
 
-    expect(text).toContain('Exit:  N/A');
-    expect(text).toContain('Exit weight:  N/A');
-    expect(text).toContain('Net weight:   N/A');
+    expect(text).toContain('Saida:   N/D');
+    expect(text).toContain('Peso saida:   N/D');
+    expect(text).toContain('Peso liquido: N/D');
+  });
+
+  it('sets double-size only for the title, keeping the body at normal (unstretched) size', () => {
+    const text = buildTicketEscPos(baseTicket).toString('latin1');
+
+    const doubleSizeCmd = String.fromCharCode(0x1d, 0x21, 0x11); // GS ! 0x11
+    const normalSizeCmd = String.fromCharCode(0x1d, 0x21, 0x00); // GS ! 0x00
+
+    const doubleAt = text.indexOf(doubleSizeCmd);
+    const titleAt = text.indexOf('TICKET DE PESAGEM');
+    const ticketFieldAt = text.indexOf('Ticket: 42');
+
+    expect(doubleAt).toBeGreaterThanOrEqual(0);
+    expect(doubleAt).toBeLessThan(titleAt);
+    // back to normal size before the body fields (no stretched characters)
+    expect(text.indexOf(normalSizeCmd, titleAt)).toBeGreaterThan(titleAt);
+    expect(text.indexOf(normalSizeCmd, titleAt)).toBeLessThan(ticketFieldAt);
+  });
+
+  it('bolds the body fields and underlines the net weight for emphasis', () => {
+    const text = buildTicketEscPos(baseTicket).toString('latin1');
+
+    const boldOnCmd = String.fromCharCode(0x1b, 0x45, 0x01);
+    const underlineOnCmd = String.fromCharCode(0x1b, 0x2d, 0x01);
+    const underlineOffCmd = String.fromCharCode(0x1b, 0x2d, 0x00);
+
+    const ticketFieldAt = text.indexOf('Ticket: 42');
+    const netWeightAt = text.indexOf('Peso liquido');
+
+    expect(text.lastIndexOf(boldOnCmd, ticketFieldAt)).toBeGreaterThanOrEqual(0);
+    expect(text.lastIndexOf(underlineOnCmd, netWeightAt)).toBeGreaterThan(text.indexOf('Peso saida'));
+    expect(text.indexOf(underlineOffCmd, netWeightAt)).toBeGreaterThan(netWeightAt);
   });
 });

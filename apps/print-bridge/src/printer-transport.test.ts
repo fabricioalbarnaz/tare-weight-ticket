@@ -1,9 +1,10 @@
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createFilePrinterTransport } from './printer-transport.js';
+import { createFilePrinterTransport, createNetworkPrinterTransport } from './printer-transport.js';
 
 let outputDir: string;
 
@@ -44,5 +45,30 @@ describe('createFilePrinterTransport', () => {
 
     const files = await fs.readdir(outputDir);
     expect(files).toHaveLength(2);
+  });
+});
+
+describe('createNetworkPrinterTransport', () => {
+  it('sends the exact bytes to a real TCP listener', async () => {
+    const received: Buffer[] = [];
+    const server = net.createServer((socket) => {
+      socket.on('data', (chunk) => received.push(chunk));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as net.AddressInfo).port;
+
+    const transport = createNetworkPrinterTransport({ host: '127.0.0.1', port });
+    const bytes = Buffer.from([0x1b, 0x40, 0x41, 0x42]);
+    await transport.print(bytes);
+
+    expect(Buffer.concat(received)).toEqual(bytes);
+
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('rejects when nothing is listening on the target port', async () => {
+    const transport = createNetworkPrinterTransport({ host: '127.0.0.1', port: 1, connectTimeoutMs: 1000 });
+
+    await expect(transport.print(Buffer.from('x'))).rejects.toThrow();
   });
 });

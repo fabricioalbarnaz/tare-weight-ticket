@@ -273,6 +273,13 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    confirm `usbipd-win` works reliably unattended (survives reboot, printer
    power-cycle, USB replug) before committing to it over the native print
    bridge fallback.
+   **Resolved on-site (2026-10-24), moot:** the first definitive PC's
+   printer turned out to be network-attached (Windows `Get-Printer` showed
+   a `POS80 Ticket` printer with its `PortName` as an IP), not USB — see
+   §11. Neither `usbipd-win` nor the native-fallback question applies to
+   this install; a `PrinterTransport` sending raw ESC/POS bytes over TCP to
+   the printer's raw/JetDirect port was built instead. Future PCs should
+   still check `Get-Printer` first rather than assuming USB.
 2. **Exact Digi-Tron Isis New TCP protocol.** Need the vendor's
    communication protocol manual (frame format, stability flag, unit,
    polling vs. push) to write the real parser. Phase 2 starts with a spike:
@@ -771,20 +778,76 @@ merge per `CLAUDE.md`):
 - **The "local npm install doesn't work" note was stale, and the fix is to
   verify each workspace in its own production environment, not to pick one
   environment for everything** (2026-10-21, confirmed reproducible on more
-  than one Windows machine, not a one-off): `better-sqlite3` and
-  `@serialport/bindings-cpp` both now resolve via prebuilt binaries on a
-  native Windows `npm install`, no Python/node-gyp toolchain needed. That
-  makes native Windows installs viable again, but which environment is
-  *authoritative* still depends on where each app actually runs in
-  production — `core-service`/`admin-ui` ship inside the Docker image, so
-  the Alpine container stays authoritative for them; `print-bridge`/
-  `scale-bridge` are native Windows processes that never run in Docker, so
-  native Windows verification is now the *more* correct choice for them,
-  not just a fallback — the container's `serialport` binary was always a
-  Linux/musl build, never the one actually shipped. See `CLAUDE.md`'s
-  updated development-workflow section. Mixing the two on one shared root
-  `node_modules` without a clean reinstall corrupts `node_modules/.bin/*`
-  shims for whichever environment ran second (caught when a native install
-  broke the following container-based `build`/`typecheck`/`lint` run with
-  `node.exe: not found`; fixed by wiping `node_modules` and reinstalling
-  clean inside the container).
+  than one Windows machine, not a one-off): `@serialport/bindings-cpp`
+  resolves via its own bundled prebuilt binary on a native Windows
+  `npm install`, no toolchain needed. **Correction (2026-10-24, confirmed
+  on-site on the first definitive production PC):** `better-sqlite3` is
+  *not* the same — its `install` script always runs `node-gyp rebuild`
+  from source regardless of the prebuilt binaries it ships in its npm
+  package, so a genuinely clean Windows machine still needs Python 3.x and
+  a C++ build toolchain (Visual Studio Build Tools, "Desktop development
+  with C++") before `npm install` succeeds at all; see
+  `docs/runbooks/per-pc-deployment.md` prerequisites. The 2026-10-21
+  machines evidently already had that toolchain for an unrelated reason.
+  Native Windows installs are still viable and still the *more* correct
+  choice for `print-bridge`/`scale-bridge` specifically (they never run in
+  Docker — the container's `serialport` binary was always a Linux/musl
+  build, never the one actually shipped), but "no toolchain needed" was
+  only ever true for `@serialport/bindings-cpp`. See `CLAUDE.md`'s updated
+  development-workflow section. Mixing a native install and a container
+  install on one shared root `node_modules` without a clean reinstall
+  corrupts `node_modules/.bin/*` shims for whichever environment ran
+  second (caught when a native install broke the following container-based
+  `build`/`typecheck`/`lint` run with `node.exe: not found`; fixed by
+  wiping `node_modules` and reinstalling clean inside the container).
+
+### First on-site install (2026-10-24, first definitive PC)
+
+- **`SCALE_HOST`/`PRINT_BRIDGE_URL` must be `host.docker.internal`, not
+  `127.0.0.1`.** `core-service` runs inside the Docker container;
+  `127.0.0.1` there is the container's own loopback, not the Windows host
+  where `scale-bridge`/`print-bridge` actually listen. This affects every
+  PC with this topology, not just this one — `127.0.0.1` looked like a
+  reasonable same-machine default but silently made the scale and print
+  bridge permanently "unreachable" in the admin status panel even with
+  real hardware wired up and both bridges running. Fixed in `.env.example`
+  and `docs/runbooks/per-pc-deployment.md`.
+- **The scale's actual COM port must be confirmed by capturing real bytes
+  and matching the indicator's display, not assumed from the serial
+  runbook's example.** This PC's COM3/COM4 came from a PCI multiport card
+  (not a USB-RS-232 adapter like the original diagnostic session), and
+  opening a port successfully (`serialOpen: true`) only proves the OS
+  could open it — not that it's wired to the scale. Confirmed COM3 by
+  capturing raw bytes matching the operator-confirmed empty-platform
+  display (`F000000.`) and showing COM4 was silent.
+- **The printer turned out to be network-attached, not USB** — see §7
+  item 1's resolution above. A real `PrinterTransport` (TCP to the
+  printer's raw/JetDirect port, conventionally 9100) was built in
+  `apps/print-bridge/src/printer-transport.ts`, selected via
+  `PRINTER_TRANSPORT=network` (vs. the pre-existing `file` placeholder).
+- **ESC/POS cut-margin bug found and fixed**: `buildTicketEscPos` fed only
+  2 blank lines before the cut command, which on the installed POS80
+  printer cut through the last line of printed text. Fixed to 5 blank
+  lines (`FEED_LINES_BEFORE_CUT` in `escpos.ts`), confirmed by physical
+  reprint on-site. This was invisible in any test that only inspects the
+  generated bytes — it only showed up printing to the real printer.
+- **Seeding the admin user into an already-running container's database
+  needs a container restart to take effect.** Both `core-service`
+  (containerized) and the seed CLI (run natively, pointed at the same
+  bind-mounted SQLite file) use WAL mode, but the already-running
+  container's connection didn't pick up the externally-inserted row —
+  login kept failing with "Invalid credentials" against a password
+  confirmed correct by hashing it directly — until the container was
+  restarted. Documented in the per-pc-deployment runbook; seeding before
+  first `docker compose up` avoids the issue entirely.
+- **`print-bridge`/`scale-bridge` were registered as NSSM Windows
+  services for the first time against a real machine** (prior phases only
+  syntax-checked the install script). Required an elevated/Administrator
+  PowerShell — plain `nssm install`/`nssm restart` from a non-elevated
+  session fails with "Access denied" opening the service manager.
+- A full entrance → real scale read → exit → real physical print smoke
+  test passed end-to-end through the complete system path (camera webhook
+  → scale-bridge → core-service → print-bridge → printer) — one
+  successful run on one PC, not production sign-off. The serial runbook's
+  on-site validation checklist (cold boot, reboot, vendor DGN spec) is
+  still open.

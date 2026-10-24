@@ -180,9 +180,19 @@ repo, the `@tare/*` packages, file paths, or Docker images to match.
 - **Verify each workspace in the environment it actually runs in
   production, not uniformly** (updated 2026-10-21 — a native, non-container
   `npm install` now works on Windows dev machines, confirmed on more than
-  one, resolving `better-sqlite3`/`@serialport/bindings-cpp` via prebuilt
-  binaries with no Python/node-gyp toolchain needed; the previous blanket
-  "local install doesn't work" note is outdated):
+  one, resolving `@serialport/bindings-cpp` via its bundled prebuilt
+  binary with no toolchain needed; the previous blanket "local install
+  doesn't work" note is outdated. **Correction (2026-10-24, confirmed
+  on-site on the first definitive production PC):** `better-sqlite3` is
+  *not* toolchain-free like `@serialport/bindings-cpp` — its own `install`
+  script always runs `node-gyp rebuild` from source regardless of the
+  prebuilt binaries it ships in its npm package, so a clean Windows
+  machine still needs Python 3.x and a C++ build toolchain (Visual Studio
+  Build Tools, "Desktop development with C++") before the root
+  `npm install` succeeds at all. The 2026-10-21 dev machines evidently
+  already had that toolchain installed for an unrelated reason, which is
+  why it looked toolchain-free from there. See
+  `docs/runbooks/per-pc-deployment.md` prerequisites.):
   - **`core-service` and `admin-ui` ship inside the Docker image**
     (`docker/Dockerfile.core-service` builds both and the container serves
     the result) — the Linux Alpine container is still the *authoritative*
