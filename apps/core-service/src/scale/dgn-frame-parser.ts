@@ -1,4 +1,4 @@
-import type { ParsedWeightFrame, ScaleFrameParser } from './types.js';
+import type { ParsedWeightFrame, ScaleFrameParser, ScaleLogger } from './types.js';
 
 /**
  * Real Digi-Tron Isis New DGN continuous-serial frame parser (see
@@ -23,6 +23,17 @@ const CANDIDATE_STATUSES = new Set(['D', 'F']);
 // corrupt an otherwise-valid reading instead of just discarding one.
 const MAX_BUFFER_LENGTH = 64;
 
+const noopLogger: ScaleLogger = {
+  info() {},
+  warn() {},
+  debug() {},
+};
+
+/** `latin1` round-trips 1:1 with the raw bytes (see push() below), so this recovers the original bytes exactly for logging. */
+function toHex(token: string): string {
+  return Buffer.from(token, 'latin1').toString('hex');
+}
+
 export interface DgnFrameParserOptions {
   /**
    * Minimum time (ms) between two readings that both count toward the
@@ -36,12 +47,19 @@ export interface DgnFrameParserOptions {
   requiredMatches?: number;
   /** Injectable clock, for deterministic tests without fake timers. Defaults to Date.now. */
   now?: () => number;
+  /**
+   * Logs frames/bytes this parser doesn't recognize or doesn't trust yet —
+   * the one place the still-unconfirmed state-byte semantics (see the
+   * module doc comment above) would actually show up. Defaults to a no-op.
+   */
+  logger?: ScaleLogger;
 }
 
 export function createDgnFrameParser(options: DgnFrameParserOptions = {}): ScaleFrameParser {
   const sampleIntervalMs = options.sampleIntervalMs ?? 2000;
   const requiredMatches = options.requiredMatches ?? 3;
   const now = options.now ?? Date.now;
+  const logger = options.logger ?? noopLogger;
 
   let buffer = '';
   let lastCountedAt = now();
@@ -50,7 +68,15 @@ export function createDgnFrameParser(options: DgnFrameParserOptions = {}): Scale
 
   function classify(token: string): ParsedWeightFrame | undefined {
     const match = FRAME_PATTERN.exec(token);
-    if (!match) return undefined;
+    if (!match) {
+      // An empty token between two adjacent CRs is a benign stray
+      // delimiter, not an anomaly — only log tokens that actually carried
+      // unrecognized bytes.
+      if (token.length > 0) {
+        logger.warn({ tokenHex: toHex(token) }, 'scale: unrecognized frame, discarding');
+      }
+      return undefined;
+    }
 
     const [, statusByte, digits] = match;
     // The regex's two capturing groups always populate alongside a
@@ -63,7 +89,9 @@ export function createDgnFrameParser(options: DgnFrameParserOptions = {}): Scale
     if (!CANDIDATE_STATUSES.has(statusByte)) {
       // `@` (oscillating) or any byte not yet confirmed (`B`, `H`, ...):
       // fail-safe — never counts toward stability, and breaks any streak
-      // in progress.
+      // in progress. Logged because this is exactly where the documented,
+      // vendor-unconfirmed status-byte assumption would show up in the field.
+      logger.warn({ statusByte, weightKg }, 'scale: unconfirmed status byte, not counted toward stability');
       currentValue = null;
       matchCount = 0;
       return { weightKg, stable: false };
@@ -108,6 +136,10 @@ export function createDgnFrameParser(options: DgnFrameParserOptions = {}): Scale
       }
 
       if (buffer.length > MAX_BUFFER_LENGTH) {
+        logger.warn(
+          { droppedLength: buffer.length, droppedHex: toHex(buffer) },
+          'scale: frame buffer overflow, dropping buffered bytes',
+        );
         buffer = '';
       }
 

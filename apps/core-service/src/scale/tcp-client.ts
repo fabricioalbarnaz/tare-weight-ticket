@@ -1,5 +1,13 @@
 import net from 'node:net';
-import type { ParsedWeightFrame, ScaleClient, ScaleFrameParser, ScaleReadResult } from './types.js';
+import type {
+  ParsedWeightFrame,
+  ScaleClient,
+  ScaleFrameParser,
+  ScaleLogger,
+  ScaleReadContext,
+  ScaleReadFailureReason,
+  ScaleReadResult,
+} from './types.js';
 
 export interface ScaleClientOptions {
   host: string;
@@ -9,14 +17,33 @@ export interface ScaleClientOptions {
   /** Separate, usually shorter, bound for establishing the TCP connection itself. */
   connectTimeoutMs?: number;
   createParser: () => ScaleFrameParser;
+  /** Defaults to a no-op logger (used by tests that don't care about log output). */
+  logger?: ScaleLogger;
 }
 
 type Waiter = (frame: ParsedWeightFrame | null) => void;
 
 const KEEP_ALIVE_DELAY_MS = 10_000;
 
+const noopLogger: ScaleLogger = {
+  info() {},
+  warn() {},
+  debug() {},
+};
+
+class ScaleConnectFailure extends Error {
+  constructor(
+    public readonly reason: 'connect_error' | 'connect_timeout',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   const connectTimeoutMs = options.connectTimeoutMs ?? 5000;
+  const logger = options.logger ?? noopLogger;
+  const endpoint = { host: options.host, port: options.port };
 
   let socket: net.Socket | null = null;
   let parser: ScaleFrameParser | null = null;
@@ -38,6 +65,7 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
 
   function teardown(): void {
     if (socket) {
+      logger.debug({ ...endpoint }, 'scale: connection torn down');
       socket.removeAllListeners();
       // Swallow any error emitted while/after destroying; an 'error' event
       // with zero listeners crashes the process.
@@ -57,20 +85,21 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     connectPromise = new Promise((resolve, reject) => {
       const sock = new net.Socket();
 
-      const onConnectFailure = (err: Error) => {
+      const onConnectFailure = (reason: 'connect_error' | 'connect_timeout', err: Error) => {
         sock.destroy();
         connectPromise = null;
-        reject(err);
+        reject(new ScaleConnectFailure(reason, err.message));
       };
 
       sock.setTimeout(connectTimeoutMs);
-      sock.once('timeout', () => onConnectFailure(new Error('scale connection timed out')));
-      sock.once('error', onConnectFailure);
+      sock.once('timeout', () => onConnectFailure('connect_timeout', new Error('scale connection timed out')));
+      sock.once('error', (err) => onConnectFailure('connect_error', err));
 
       sock.connect(options.port, options.host, () => {
         sock.setTimeout(0);
         sock.removeListener('error', onConnectFailure);
         sock.setKeepAlive(true, KEEP_ALIVE_DELAY_MS);
+        logger.debug({ ...endpoint }, 'scale: connection established');
 
         parser = options.createParser();
         socket = sock;
@@ -96,21 +125,40 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     return connectPromise;
   }
 
-  async function readOne(): Promise<ScaleReadResult> {
+  async function readOne(context?: ScaleReadContext): Promise<ScaleReadResult> {
+    const log = context?.logger ?? logger;
+    const meta = { ...endpoint, direction: context?.direction, plate: context?.plate };
+    const startedAt = Date.now();
+
     try {
       await connect();
-    } catch {
-      return { weightKg: null, weightCaptureFailed: true };
+    } catch (err) {
+      const waitedMs = Date.now() - startedAt;
+      const failureReason: ScaleReadFailureReason =
+        err instanceof ScaleConnectFailure ? err.reason : 'connect_error';
+      log.warn(
+        { ...meta, waitedMs, failureReason, err: (err as Error).message },
+        'scale read failed: could not connect',
+      );
+      return { weightKg: null, weightCaptureFailed: true, failureReason, waitedMs };
     }
 
     return new Promise<ScaleReadResult>((resolve) => {
       const waiter: Waiter = (frame) => {
         clearTimeout(timer);
-        resolve(
-          frame === null
-            ? { weightKg: null, weightCaptureFailed: true }
-            : { weightKg: frame.weightKg, weightCaptureFailed: false },
-        );
+        const waitedMs = Date.now() - startedAt;
+
+        if (frame === null) {
+          // Only reached when the connection itself failed/closed while this
+          // waiter was still pending (the stability-timeout path below
+          // removes itself from `waiters` before ever tearing down).
+          log.warn({ ...meta, waitedMs, failureReason: 'socket_error' }, 'scale read failed: connection lost while waiting for a stable reading');
+          resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'socket_error', waitedMs });
+          return;
+        }
+
+        log.info({ ...meta, waitedMs, weightKg: frame.weightKg }, 'scale read succeeded');
+        resolve({ weightKg: frame.weightKg, weightCaptureFailed: false, waitedMs });
       };
 
       const timer = setTimeout(() => {
@@ -118,7 +166,9 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
         // Force a reconnect on the next read: otherwise a frame that settles
         // just after this timeout could answer a later, unrelated read.
         teardown();
-        resolve({ weightKg: null, weightCaptureFailed: true });
+        const waitedMs = Date.now() - startedAt;
+        log.warn({ ...meta, waitedMs, failureReason: 'stability_timeout' }, 'scale read failed: no stable weight within timeout');
+        resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout', waitedMs });
       }, options.stabilityTimeoutMs);
 
       waiters.push(waiter);
@@ -126,8 +176,9 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   }
 
   return {
-    readStableWeight(): Promise<ScaleReadResult> {
-      const result = readQueue.then(readOne, readOne);
+    readStableWeight(context?: ScaleReadContext): Promise<ScaleReadResult> {
+      const run = (): Promise<ScaleReadResult> => readOne(context);
+      const result = readQueue.then(run, run);
       readQueue = result;
       return result;
     },

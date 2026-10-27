@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createPlaceholderFrameParser } from './placeholder-frame-parser.js';
 import { startMockScaleServer, type MockScaleServer } from './mock-scale-server.js';
 import { createTcpScaleClient } from './tcp-client.js';
-import type { ScaleClient } from './types.js';
+import type { ScaleClient, ScaleLogger } from './types.js';
 
 let server: MockScaleServer | undefined;
 let client: ScaleClient | undefined;
@@ -13,6 +13,24 @@ afterEach(async () => {
   await server?.close();
   server = undefined;
 });
+
+interface CapturedLog {
+  level: 'info' | 'warn' | 'debug';
+  obj: Record<string, unknown>;
+  msg?: string;
+}
+
+function createCapturingLogger(): { logger: ScaleLogger; calls: CapturedLog[] } {
+  const calls: CapturedLog[] = [];
+  return {
+    calls,
+    logger: {
+      info: (obj, msg) => calls.push({ level: 'info', obj, msg }),
+      warn: (obj, msg) => calls.push({ level: 'warn', obj, msg }),
+      debug: (obj, msg) => calls.push({ level: 'debug', obj, msg }),
+    },
+  };
+}
 
 describe('createTcpScaleClient', () => {
   it('resolves with the stable weight once the scale reports it', async () => {
@@ -28,7 +46,7 @@ describe('createTcpScaleClient', () => {
     await server.waitForConnection();
     server.send('ST,20000');
 
-    await expect(readPromise).resolves.toEqual({ weightKg: 20000, weightCaptureFailed: false });
+    await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
   });
 
   it('resolves with the stable weight after several unstable frames', async () => {
@@ -46,10 +64,10 @@ describe('createTcpScaleClient', () => {
     server.send('US,19995');
     server.send('ST,20000');
 
-    await expect(readPromise).resolves.toEqual({ weightKg: 20000, weightCaptureFailed: false });
+    await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
   });
 
-  it('resolves with weightCaptureFailed when the scale never stabilizes in time', async () => {
+  it('resolves with weightCaptureFailed and a stability_timeout reason when the scale never stabilizes in time', async () => {
     server = await startMockScaleServer();
     client = createTcpScaleClient({
       host: '127.0.0.1',
@@ -62,10 +80,14 @@ describe('createTcpScaleClient', () => {
     await server.waitForConnection();
     server.send('US,19980');
 
-    await expect(readPromise).resolves.toEqual({ weightKg: null, weightCaptureFailed: true });
+    await expect(readPromise).resolves.toMatchObject({
+      weightKg: null,
+      weightCaptureFailed: true,
+      failureReason: 'stability_timeout',
+    });
   });
 
-  it('resolves with weightCaptureFailed when the scale is unreachable', async () => {
+  it('resolves with weightCaptureFailed and a connect_error reason when the scale is unreachable', async () => {
     client = createTcpScaleClient({
       host: '127.0.0.1',
       port: 1,
@@ -74,9 +96,10 @@ describe('createTcpScaleClient', () => {
       createParser: createPlaceholderFrameParser,
     });
 
-    await expect(client.readStableWeight()).resolves.toEqual({
+    await expect(client.readStableWeight()).resolves.toMatchObject({
       weightKg: null,
       weightCaptureFailed: true,
+      failureReason: 'connect_error',
     });
   });
 
@@ -92,11 +115,11 @@ describe('createTcpScaleClient', () => {
     const firstRead = client.readStableWeight();
     await server.waitForConnection();
     server.send('ST,20000');
-    await expect(firstRead).resolves.toEqual({ weightKg: 20000, weightCaptureFailed: false });
+    await expect(firstRead).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
 
     const secondRead = client.readStableWeight();
     server.send('ST,8000');
-    await expect(secondRead).resolves.toEqual({ weightKg: 8000, weightCaptureFailed: false });
+    await expect(secondRead).resolves.toMatchObject({ weightKg: 8000, weightCaptureFailed: false });
   });
 
   it('serializes concurrent reads so each gets its own stable frame', async () => {
@@ -113,10 +136,10 @@ describe('createTcpScaleClient', () => {
 
     await server.waitForConnection();
     server.send('ST,20000');
-    await expect(firstRead).resolves.toEqual({ weightKg: 20000, weightCaptureFailed: false });
+    await expect(firstRead).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
 
     server.send('ST,8000');
-    await expect(secondRead).resolves.toEqual({ weightKg: 8000, weightCaptureFailed: false });
+    await expect(secondRead).resolves.toMatchObject({ weightKg: 8000, weightCaptureFailed: false });
   });
 
   it('reconnects after a stability timeout instead of reusing the stale connection', async () => {
@@ -130,13 +153,13 @@ describe('createTcpScaleClient', () => {
 
     const firstRead = client.readStableWeight();
     await server.waitForConnection();
-    await expect(firstRead).resolves.toEqual({ weightKg: null, weightCaptureFailed: true });
+    await expect(firstRead).resolves.toMatchObject({ weightKg: null, weightCaptureFailed: true });
 
     const secondRead = client.readStableWeight();
     await server.waitForConnection(2);
     server.send('ST,12345');
 
-    await expect(secondRead).resolves.toEqual({ weightKg: 12345, weightCaptureFailed: false });
+    await expect(secondRead).resolves.toMatchObject({ weightKg: 12345, weightCaptureFailed: false });
     expect(server.connectionCount).toBe(2);
   });
 
@@ -184,6 +207,94 @@ describe('createTcpScaleClient', () => {
       await server.waitForConnection();
 
       expect(client.getStatus().connected).toBe(false);
+    });
+  });
+
+  describe('logging', () => {
+    it('logs an info line with weightKg and a numeric waitedMs on a successful read', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      const readPromise = client.readStableWeight();
+      await server.waitForConnection();
+      server.send('ST,20000');
+      await readPromise;
+
+      const infoLogs = calls.filter((c) => c.level === 'info');
+      expect(infoLogs).toHaveLength(1);
+      expect(infoLogs[0]?.obj.weightKg).toBe(20000);
+      expect(typeof infoLogs[0]?.obj.waitedMs).toBe('number');
+    });
+
+    it('logs a warning with failureReason stability_timeout when the scale never stabilizes', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 200,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      await client.readStableWeight();
+
+      const warnLogs = calls.filter((c) => c.level === 'warn');
+      expect(warnLogs).toHaveLength(1);
+      expect(warnLogs[0]?.obj.failureReason).toBe('stability_timeout');
+    });
+
+    it('logs a warning with failureReason connect_error when the scale is unreachable', async () => {
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: 1,
+        stabilityTimeoutMs: 1000,
+        connectTimeoutMs: 200,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      await client.readStableWeight();
+
+      const warnLogs = calls.filter((c) => c.level === 'warn');
+      expect(warnLogs).toHaveLength(1);
+      expect(warnLogs[0]?.obj.failureReason).toBe('connect_error');
+    });
+
+    it('prefers the per-call context logger over the client logger, and includes direction/plate', async () => {
+      server = await startMockScaleServer();
+      const clientLogger = createCapturingLogger();
+      const contextLogger = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+        logger: clientLogger.logger,
+      });
+
+      const readPromise = client.readStableWeight({
+        logger: contextLogger.logger,
+        direction: 'entrance',
+        plate: 'ABC1234',
+      });
+      await server.waitForConnection();
+      server.send('ST,20000');
+      await readPromise;
+
+      expect(clientLogger.calls.filter((c) => c.level === 'info')).toHaveLength(0);
+      const infoLogs = contextLogger.calls.filter((c) => c.level === 'info');
+      expect(infoLogs).toHaveLength(1);
+      expect(infoLogs[0]?.obj.direction).toBe('entrance');
+      expect(infoLogs[0]?.obj.plate).toBe('ABC1234');
     });
   });
 });

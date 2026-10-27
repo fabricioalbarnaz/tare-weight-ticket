@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 
 export interface BridgeHealth {
   serialOpen: boolean;
@@ -7,6 +7,8 @@ export interface BridgeHealth {
 
 export interface BuildAppOptions {
   getHealth(): BridgeHealth;
+  /** Shares one pino instance with the serial transport/relay server. Falls back to Fastify's own default logger when omitted (e.g. in tests). */
+  logger?: FastifyBaseLogger;
 }
 
 /**
@@ -15,7 +17,7 @@ export interface BuildAppOptions {
  * `GET /health` shape for the Admin UI's hardware status panel.
  */
 export function buildApp(options: BuildAppOptions): FastifyInstance {
-  const app = Fastify({ logger: true });
+  const app = options.logger ? Fastify({ loggerInstance: options.logger }) : Fastify({ logger: true });
 
   app.get('/health', async () => ({ status: 'ok', ...options.getHealth() }));
 

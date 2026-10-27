@@ -1,4 +1,5 @@
 import { normalizePlate } from '../domain/plate.js';
+import type { ScaleReadFailureReason } from '../scale/types.js';
 import type { Ticket, TicketRepository } from './repository.js';
 
 export const TICKET_AUDIT_ACTIONS = {
@@ -18,6 +19,9 @@ export interface EntranceReadingInput {
   weightKg: number | null;
   /** True when the scale never reported a stable weight within the timeout. */
   weightCaptureFailed: boolean;
+  /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
+  failureReason?: ScaleReadFailureReason;
+  waitedMs?: number;
 }
 
 export type EntranceResult =
@@ -31,6 +35,9 @@ export interface ExitReadingInput {
   timestamp: Date;
   weightKg: number | null;
   weightCaptureFailed: boolean;
+  /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
+  failureReason?: ScaleReadFailureReason;
+  waitedMs?: number;
 }
 
 export type ExitResult =
@@ -90,6 +97,17 @@ export function createSessionService(repo: TicketRepository): SessionService {
           { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
           ticket.id,
         );
+        repo.recordRawEvent(
+          'scale',
+          {
+            direction: 'entrance',
+            weightKg: input.weightKg,
+            weightCaptureFailed: input.weightCaptureFailed,
+            failureReason: input.failureReason,
+            waitedMs: input.waitedMs,
+          },
+          ticket.id,
+        );
 
         return { kind: existing ? 'ticket_retriggered' : 'ticket_opened', ticket };
       });
@@ -135,6 +153,17 @@ export function createSessionService(repo: TicketRepository): SessionService {
             },
             ticket.id,
           );
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'exit',
+              weightKg: input.weightKg,
+              weightCaptureFailed: input.weightCaptureFailed,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
           return { kind: 'ticket_closed', ticket };
         }
 
@@ -152,6 +181,17 @@ export function createSessionService(repo: TicketRepository): SessionService {
         repo.recordRawEvent(
           'camera_exit',
           { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+          ticket.id,
+        );
+        repo.recordRawEvent(
+          'scale',
+          {
+            direction: 'exit',
+            weightKg: input.weightKg,
+            weightCaptureFailed: input.weightCaptureFailed,
+            failureReason: input.failureReason,
+            waitedMs: input.waitedMs,
+          },
           ticket.id,
         );
         return { kind: 'anomaly_flagged', ticket };

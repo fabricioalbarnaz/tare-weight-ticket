@@ -44,6 +44,16 @@ function rawEventCount(): number {
   return db.select().from(rawEvents).all().length;
 }
 
+function scaleRawEventsFor(ticketId: number): Array<Record<string, unknown>> {
+  return db
+    .select()
+    .from(rawEvents)
+    .where(eq(rawEvents.linkedTicketId, ticketId))
+    .all()
+    .filter((row) => row.source === 'scale')
+    .map((row) => JSON.parse(row.rawPayload) as Record<string, unknown>);
+}
+
 describe('SessionService — entrance', () => {
   it('opens a new ticket on the first entrance reading for a plate', () => {
     const result = service.handleEntranceReading({
@@ -114,6 +124,47 @@ describe('SessionService — entrance', () => {
 
     expect(result).toEqual({ kind: 'plate_unreadable' });
     expect(rawEventCount()).toBe(1);
+  });
+
+  it('records a scale raw event linked to the ticket on a successful entrance capture', () => {
+    const result = service.handleEntranceReading({
+      rawPlate: 'SCALE001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+      waitedMs: 1234,
+    });
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const scaleEvents = scaleRawEventsFor(result.ticket.id);
+    expect(scaleEvents).toEqual([
+      { direction: 'entrance', weightKg: 20000, weightCaptureFailed: false, waitedMs: 1234 },
+    ]);
+  });
+
+  it('records the failure reason in the scale raw event on an entrance scale timeout', () => {
+    const result = service.handleEntranceReading({
+      rawPlate: 'SCALE002',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+      failureReason: 'stability_timeout',
+      waitedMs: 15000,
+    });
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const scaleEvents = scaleRawEventsFor(result.ticket.id);
+    expect(scaleEvents).toEqual([
+      {
+        direction: 'entrance',
+        weightKg: null,
+        weightCaptureFailed: true,
+        failureReason: 'stability_timeout',
+        waitedMs: 15000,
+      },
+    ]);
   });
 });
 
@@ -219,5 +270,79 @@ describe('SessionService — exit', () => {
 
     expect(result).toEqual({ kind: 'plate_unreadable' });
     expect(rawEventCount()).toBe(1);
+  });
+
+  it('records a scale raw event linked to the ticket when closing', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'SCALE003',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const exit = service.handleExitReading({
+      rawPlate: 'SCALE003',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date('2026-01-01T09:00:00Z'),
+      weightKg: 8000,
+      weightCaptureFailed: false,
+      waitedMs: 2000,
+    });
+    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+    const scaleEvents = scaleRawEventsFor(exit.ticket.id);
+    expect(scaleEvents).toEqual([
+      { direction: 'entrance', weightKg: 20000, weightCaptureFailed: false },
+      { direction: 'exit', weightKg: 8000, weightCaptureFailed: false, waitedMs: 2000 },
+    ]);
+  });
+
+  it('records the failure reason in the scale raw event on an exit scale timeout', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'SCALE004',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      weightKg: 15000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const exit = service.handleExitReading({
+      rawPlate: 'SCALE004',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+      failureReason: 'socket_error',
+      waitedMs: 500,
+    });
+    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+    const scaleEvents = scaleRawEventsFor(exit.ticket.id).filter((e) => e.direction === 'exit');
+    expect(scaleEvents).toEqual([
+      {
+        direction: 'exit',
+        weightKg: null,
+        weightCaptureFailed: true,
+        failureReason: 'socket_error',
+        waitedMs: 500,
+      },
+    ]);
+  });
+
+  it('records a scale raw event when flagging an anomaly', () => {
+    const result = service.handleExitReading({
+      rawPlate: 'SCALE005',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      weightKg: 9000,
+      weightCaptureFailed: false,
+    });
+    if (result.kind !== 'anomaly_flagged') throw new Error('unreachable');
+
+    const scaleEvents = scaleRawEventsFor(result.ticket.id);
+    expect(scaleEvents).toEqual([{ direction: 'exit', weightKg: 9000, weightCaptureFailed: false }]);
   });
 });

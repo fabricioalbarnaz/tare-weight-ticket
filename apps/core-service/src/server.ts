@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import pino from 'pino';
 import { buildApp } from './app.js';
 import { createDb } from './db/client.js';
 import { createDgnFrameParser } from './scale/dgn-frame-parser.js';
@@ -32,6 +33,12 @@ const adminUiDir = fs.existsSync(path.join(configuredAdminUiDir, 'index.html'))
   ? configuredAdminUiDir
   : undefined;
 
+// Created up front (not by Fastify) and shared with the scale client/parser
+// via loggerInstance, so a scale read and the webhook that triggered it (and
+// the scale-level connect/parse events that have no HTTP request at all)
+// all land in one JSON stream with one shape.
+const logger = pino();
+
 const { db } = createDb(dbPath);
 
 const scaleConfig = loadScaleConfig();
@@ -40,10 +47,12 @@ const scaleClient = createTcpScaleClient({
   port: scaleConfig.port,
   stabilityTimeoutMs: scaleConfig.stabilityTimeoutMs,
   connectTimeoutMs: scaleConfig.connectTimeoutMs,
+  logger: logger.child({ component: 'scale-client' }),
   createParser: () =>
     createDgnFrameParser({
       requiredMatches: scaleConfig.stabilityReadingCount,
       sampleIntervalMs: scaleConfig.stabilitySampleIntervalMs,
+      logger: logger.child({ component: 'dgn-frame-parser' }),
     }),
 });
 
@@ -66,6 +75,7 @@ const app = buildApp({
   printClient,
   adminSessionSecret: adminConfig.sessionSecret,
   adminUiDir,
+  logger,
 });
 
 app.listen({ port, host: '0.0.0.0' }).catch((err) => {

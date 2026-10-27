@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { Db } from './db/client.js';
@@ -27,10 +27,18 @@ export interface BuildAppOptions {
    * Vite dev server).
    */
   adminUiDir?: string;
+  /**
+   * Shares one pino instance with the rest of the process (scale client,
+   * frame parser) so every log line — HTTP access logs included — lands in
+   * the same stream with the same JSON shape. Falls back to Fastify's own
+   * default logger when omitted (e.g. in tests that don't care about log
+   * output).
+   */
+  logger?: FastifyBaseLogger;
 }
 
 export function buildApp(options: BuildAppOptions): FastifyInstance {
-  const app = Fastify({ logger: true });
+  const app = options.logger ? Fastify({ loggerInstance: options.logger }) : Fastify({ logger: true });
 
   const repo = createTicketRepository(options.db);
   const sessionService = createSessionService(repo);

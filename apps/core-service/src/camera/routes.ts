@@ -58,7 +58,11 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs } = await options.scaleClient.readStableWeight({
+      logger: request.log,
+      direction: 'entrance',
+      plate: event.rawPlate,
+    });
     // The truck is on the scale regardless of the outcome below (missing
     // ticket, failed capture, etc.) — it must never be left stuck there.
     await options.driverSignalAdapter.signalDriver('in');
@@ -69,6 +73,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       timestamp: event.timestamp,
       weightKg,
       weightCaptureFailed,
+      failureReason,
+      waitedMs,
     });
 
     reply.send(toResponseBody(result));
@@ -87,7 +93,11 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    const { weightKg, weightCaptureFailed } = await options.scaleClient.readStableWeight();
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs } = await options.scaleClient.readStableWeight({
+      logger: request.log,
+      direction: 'exit',
+      plate: event.rawPlate,
+    });
     await options.driverSignalAdapter.signalDriver('out');
 
     const result = options.sessionService.handleExitReading({
@@ -96,6 +106,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       timestamp: event.timestamp,
       weightKg,
       weightCaptureFailed,
+      failureReason,
+      waitedMs,
     });
 
     if (result.kind === 'ticket_closed') {

@@ -1,7 +1,26 @@
 import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { BridgeLogger } from './logger.js';
 import { startRelayServer, type RelayServer } from './relay-server.js';
 import type { SerialTransport } from './serial-transport.js';
+
+interface CapturedLog {
+  level: 'info' | 'warn' | 'error';
+  obj: Record<string, unknown>;
+  msg?: string;
+}
+
+function createCapturingLogger(): { logger: BridgeLogger; calls: CapturedLog[] } {
+  const calls: CapturedLog[] = [];
+  return {
+    calls,
+    logger: {
+      info: (obj, msg) => calls.push({ level: 'info', obj, msg }),
+      warn: (obj, msg) => calls.push({ level: 'warn', obj, msg }),
+      error: (obj, msg) => calls.push({ level: 'error', obj, msg }),
+    },
+  };
+}
 
 interface FakeSerialTransport extends SerialTransport {
   emit(chunk: Buffer): void;
@@ -105,5 +124,19 @@ describe('startRelayServer', () => {
     clients.push(client);
 
     expect(server.connectionCount).toBe(1);
+  });
+
+  it('logs when a relay client connects and disconnects', async () => {
+    const transport = createFakeSerialTransport();
+    const { logger, calls } = createCapturingLogger();
+    server = await startRelayServer({ port: 0, transport, logger });
+
+    const client = await connectClient(server.port);
+    clients.push(client);
+    client.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(calls.filter((c) => c.level === 'info' && c.msg === 'scale-bridge: relay client connected')).toHaveLength(1);
+    expect(calls.filter((c) => c.level === 'info' && c.msg === 'scale-bridge: relay client disconnected')).toHaveLength(1);
   });
 });

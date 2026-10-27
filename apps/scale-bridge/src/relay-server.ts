@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { noopLogger, type BridgeLogger } from './logger.js';
 import type { SerialTransport } from './serial-transport.js';
 
 export interface RelayServer {
@@ -11,6 +12,8 @@ export interface StartRelayServerOptions {
   port: number;
   host?: string;
   transport: SerialTransport;
+  /** Defaults to a no-op logger (used by tests that don't care about log output). */
+  logger?: BridgeLogger;
 }
 
 /**
@@ -22,20 +25,42 @@ export interface StartRelayServerOptions {
  * data actually originated from a physical COM port.
  */
 export function startRelayServer(options: StartRelayServerOptions): Promise<RelayServer> {
+  const logger = options.logger ?? noopLogger;
+
   return new Promise((resolve, reject) => {
     const clients = new Set<net.Socket>();
     let connectionCount = 0;
 
     options.transport.onData((chunk) => {
-      for (const client of clients) client.write(chunk);
+      for (const client of clients) {
+        try {
+          client.write(chunk);
+        } catch (err) {
+          logger.warn(
+            { remoteAddress: client.remoteAddress, err: (err as Error).message },
+            'scale-bridge: failed to forward bytes to a relay client',
+          );
+        }
+      }
     });
 
     const server = net.createServer((socket) => {
       clients.add(socket);
       connectionCount += 1;
-      socket.on('close', () => clients.delete(socket));
+      logger.info({ remoteAddress: socket.remoteAddress, connectionCount }, 'scale-bridge: relay client connected');
+
+      socket.on('close', () => {
+        clients.delete(socket);
+        logger.info({ remoteAddress: socket.remoteAddress }, 'scale-bridge: relay client disconnected');
+      });
       // A client disconnecting mid-write must not crash the process.
-      socket.on('error', () => clients.delete(socket));
+      socket.on('error', (err) => {
+        clients.delete(socket);
+        logger.warn(
+          { remoteAddress: socket.remoteAddress, err: err.message },
+          'scale-bridge: relay client socket error',
+        );
+      });
     });
 
     server.once('error', reject);

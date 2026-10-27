@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDgnFrameParser } from './dgn-frame-parser.js';
+import type { ScaleLogger } from './types.js';
 
 function frame(status: string, weightKg: number): string {
   return `${status}${weightKg.toString().padStart(6, '0')}.\r`;
@@ -11,6 +12,24 @@ function createClock(start = 0) {
     now: () => time,
     advance(ms: number) {
       time += ms;
+    },
+  };
+}
+
+interface CapturedLog {
+  level: 'info' | 'warn' | 'debug';
+  obj: Record<string, unknown>;
+  msg?: string;
+}
+
+function createCapturingLogger(): { logger: ScaleLogger; calls: CapturedLog[] } {
+  const calls: CapturedLog[] = [];
+  return {
+    calls,
+    logger: {
+      info: (obj, msg) => calls.push({ level: 'info', obj, msg }),
+      warn: (obj, msg) => calls.push({ level: 'warn', obj, msg }),
+      debug: (obj, msg) => calls.push({ level: 'debug', obj, msg }),
     },
   };
 }
@@ -173,5 +192,51 @@ describe('createDgnFrameParser', () => {
       { weightKg: 100, stable: false },
       { weightKg: 105, stable: false },
     ]);
+  });
+
+  it('logs a warning with the raw bytes when a token does not match the frame pattern, without changing parsing output', () => {
+    const clock = createClock();
+    const { logger, calls } = createCapturingLogger();
+    const parser = createDgnFrameParser({ now: clock.now, logger });
+
+    const garbage = Buffer.from([0xff, 0x00, 0x01, 0x80, 0x90, 0x0d, 0x0d, 0x0d]);
+    const frames = parser.push(garbage);
+
+    expect(frames).toEqual([]);
+    const warnings = calls.filter((c) => c.level === 'warn');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.obj.tokenHex).toBe(Buffer.from([0xff, 0x00, 0x01, 0x80, 0x90]).toString('hex'));
+  });
+
+  it('logs a warning for an unconfirmed/unrecognized status byte, without changing parsing output', () => {
+    const clock = createClock();
+    const { logger, calls } = createCapturingLogger();
+    const parser = createDgnFrameParser({ now: clock.now, logger });
+
+    clock.advance(2000);
+    parser.push(Buffer.from(frame('D', 46560)));
+    clock.advance(2000);
+    parser.push(Buffer.from(frame('D', 46560)));
+
+    clock.advance(2000);
+    const frames = parser.push(Buffer.from(frame('H', 46560)));
+
+    expect(frames).toEqual([{ weightKg: 46560, stable: false }]);
+    const warnings = calls.filter((c) => c.level === 'warn');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.obj).toEqual({ statusByte: 'H', weightKg: 46560 });
+  });
+
+  it('logs a warning when the frame buffer overflows and is dropped', () => {
+    const clock = createClock();
+    const { logger, calls } = createCapturingLogger();
+    const parser = createDgnFrameParser({ now: clock.now, logger });
+
+    const longGarbage = Buffer.from('x'.repeat(10_000));
+    parser.push(longGarbage);
+
+    const warnings = calls.filter((c) => c.level === 'warn');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.obj.droppedLength).toBe(10_000);
   });
 });
