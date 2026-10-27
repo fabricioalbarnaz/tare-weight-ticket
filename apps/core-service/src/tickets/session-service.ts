@@ -14,7 +14,15 @@ export const TICKET_AUDIT_ACTIONS = {
 export interface EntranceReadingInput {
   rawPlate: string;
   cameraId: string;
+  /** Camera-reported event time — forensic only, see `receivedAt`. */
   timestamp: Date;
+  /**
+   * Server clock time at webhook receipt, captured before the scale wait.
+   * This is the authoritative source for `entryAt` — the camera's own
+   * `timestamp` is not trusted for it, since the camera's clock can drift
+   * or be misconfigured independently of the server.
+   */
+  receivedAt: Date;
   /** The stable weight read from the scale, or null if the read timed out. */
   weightKg: number | null;
   /** True when the scale never reported a stable weight within the timeout. */
@@ -32,7 +40,14 @@ export type EntranceResult =
 export interface ExitReadingInput {
   rawPlate: string;
   cameraId: string;
+  /** Camera-reported event time — forensic only, see `receivedAt`. */
   timestamp: Date;
+  /**
+   * Server clock time at webhook receipt, captured before the scale wait.
+   * This is the authoritative source for `exitAt` — see the matching note
+   * on `EntranceReadingInput.receivedAt`.
+   */
+  receivedAt: Date;
   weightKg: number | null;
   weightCaptureFailed: boolean;
   /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
@@ -74,14 +89,14 @@ export function createSessionService(repo: TicketRepository): SessionService {
 
         const ticket = existing
           ? repo.updateEntry(existing.id, {
-              entryAt: input.timestamp,
+              entryAt: input.receivedAt,
               entryWeightKg: input.weightKg,
               entryCameraId: input.cameraId,
               entryCaptureFailed: input.weightCaptureFailed,
             })
           : repo.create({
               plate,
-              entryAt: input.timestamp,
+              entryAt: input.receivedAt,
               entryWeightKg: input.weightKg,
               entryCameraId: input.cameraId,
               entryCaptureFailed: input.weightCaptureFailed,
@@ -130,7 +145,7 @@ export function createSessionService(repo: TicketRepository): SessionService {
 
         if (existing) {
           const ticket = repo.close(existing.id, {
-            exitAt: input.timestamp,
+            exitAt: input.receivedAt,
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,
             exitCaptureFailed: input.weightCaptureFailed,
@@ -169,7 +184,7 @@ export function createSessionService(repo: TicketRepository): SessionService {
 
         const ticket = repo.flagAnomaly({
           plate,
-          exitAt: input.timestamp,
+          exitAt: input.receivedAt,
           exitWeightKg: input.weightKg,
           exitCameraId: input.cameraId,
           exitCaptureFailed: input.weightCaptureFailed,

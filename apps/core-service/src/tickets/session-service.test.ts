@@ -60,6 +60,7 @@ describe('SessionService — entrance', () => {
       rawPlate: 'abc-1234',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:01Z'),
       weightKg: 20000,
       weightCaptureFailed: false,
     });
@@ -72,11 +73,26 @@ describe('SessionService — entrance', () => {
     expect(auditActionsFor(result.ticket.id)).toEqual(['entry_captured']);
   });
 
+  it('uses the server-received time, not the camera-reported time, for entryAt', () => {
+    const result = service.handleEntranceReading({
+      rawPlate: 'SRVTIME1',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2020-01-01T00:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:01Z'),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+    expect(result.ticket.entryAt).toEqual(new Date('2026-01-01T08:00:01Z'));
+  });
+
   it('overwrites entry data on a retrigger without creating a second ticket', () => {
     const first = service.handleEntranceReading({
       rawPlate: 'RET1234',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:00Z'),
       weightKg: 19000,
       weightCaptureFailed: false,
     });
@@ -86,6 +102,7 @@ describe('SessionService — entrance', () => {
       rawPlate: 'RET1234',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:05Z'),
+      receivedAt: new Date('2026-01-01T08:00:05Z'),
       weightKg: 19500,
       weightCaptureFailed: false,
     });
@@ -103,6 +120,7 @@ describe('SessionService — entrance', () => {
       rawPlate: 'TIME0001',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: null,
       weightCaptureFailed: true,
     });
@@ -118,6 +136,7 @@ describe('SessionService — entrance', () => {
       rawPlate: '   ',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 18000,
       weightCaptureFailed: false,
     });
@@ -131,6 +150,7 @@ describe('SessionService — entrance', () => {
       rawPlate: 'SCALE001',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 20000,
       weightCaptureFailed: false,
       waitedMs: 1234,
@@ -148,6 +168,7 @@ describe('SessionService — entrance', () => {
       rawPlate: 'SCALE002',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: null,
       weightCaptureFailed: true,
       failureReason: 'stability_timeout',
@@ -174,6 +195,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'LOAD0001',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:01Z'),
       weightKg: 20000,
       weightCaptureFailed: false,
     });
@@ -183,6 +205,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'LOAD0001',
       cameraId: 'cam-exit-1',
       timestamp: new Date('2026-01-01T09:00:00Z'),
+      receivedAt: new Date('2026-01-01T09:00:01Z'),
       weightKg: 8000,
       weightCaptureFailed: false,
     });
@@ -192,6 +215,7 @@ describe('SessionService — exit', () => {
     expect(exit.ticket.id).toBe(entrance.ticket.id);
     expect(exit.ticket.status).toBe('CLOSED');
     expect(exit.ticket.netWeightKg).toBe(12000);
+    expect(exit.ticket.exitAt).toEqual(new Date('2026-01-01T09:00:01Z'));
     expect(repo.findOpenByPlate('LOAD0001')).toBeUndefined();
     expect(auditActionsFor(exit.ticket.id)).toEqual(['entry_captured', 'exit_captured']);
   });
@@ -201,6 +225,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'LOAD0002',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:00Z'),
       weightKg: 8000,
       weightCaptureFailed: false,
     });
@@ -210,6 +235,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'LOAD0002',
       cameraId: 'cam-exit-1',
       timestamp: new Date('2026-01-01T09:00:00Z'),
+      receivedAt: new Date('2026-01-01T09:00:00Z'),
       weightKg: 20000,
       weightCaptureFailed: false,
     });
@@ -223,6 +249,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'NOENTRY1',
       cameraId: 'cam-exit-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 9000,
       weightCaptureFailed: false,
     });
@@ -239,6 +266,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'EXITFAIL',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 15000,
       weightCaptureFailed: false,
     });
@@ -248,6 +276,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'EXITFAIL',
       cameraId: 'cam-exit-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: null,
       weightCaptureFailed: true,
     });
@@ -264,6 +293,7 @@ describe('SessionService — exit', () => {
       rawPlate: '',
       cameraId: 'cam-exit-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 9000,
       weightCaptureFailed: false,
     });
@@ -277,6 +307,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'SCALE003',
       cameraId: 'cam-entrance-1',
       timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:00Z'),
       weightKg: 20000,
       weightCaptureFailed: false,
     });
@@ -286,6 +317,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'SCALE003',
       cameraId: 'cam-exit-1',
       timestamp: new Date('2026-01-01T09:00:00Z'),
+      receivedAt: new Date('2026-01-01T09:00:00Z'),
       weightKg: 8000,
       weightCaptureFailed: false,
       waitedMs: 2000,
@@ -304,6 +336,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'SCALE004',
       cameraId: 'cam-entrance-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 15000,
       weightCaptureFailed: false,
     });
@@ -313,6 +346,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'SCALE004',
       cameraId: 'cam-exit-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: null,
       weightCaptureFailed: true,
       failureReason: 'socket_error',
@@ -337,6 +371,7 @@ describe('SessionService — exit', () => {
       rawPlate: 'SCALE005',
       cameraId: 'cam-exit-1',
       timestamp: new Date(),
+      receivedAt: new Date(),
       weightKg: 9000,
       weightCaptureFailed: false,
     });

@@ -46,6 +46,12 @@ async function readAnprXmlPart(request: FastifyRequest, reply: FastifyReply): Pr
 
 export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
   app.post('/webhooks/camera/entrance', async (request, reply) => {
+    // Captured before the scale wait so entryAt reflects when the truck
+    // actually crossed the camera, not when the (possibly multi-second)
+    // stable-weight read finished. The camera's own `dateTime` is not
+    // trusted for this — its clock isn't kept in sync with the server.
+    const receivedAt = new Date();
+
     const xml = await readAnprXmlPart(request, reply);
     if (xml === null) return;
 
@@ -71,6 +77,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
+      receivedAt,
       weightKg,
       weightCaptureFailed,
       failureReason,
@@ -81,6 +88,10 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
   });
 
   app.post('/webhooks/camera/exit', async (request, reply) => {
+    // See the matching comment in the entrance handler — captured before
+    // the scale wait, not trusted from the camera's own `dateTime`.
+    const receivedAt = new Date();
+
     const xml = await readAnprXmlPart(request, reply);
     if (xml === null) return;
 
@@ -104,6 +115,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
+      receivedAt,
       weightKg,
       weightCaptureFailed,
       failureReason,
