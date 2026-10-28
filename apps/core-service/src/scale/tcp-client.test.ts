@@ -163,6 +163,80 @@ describe('createTcpScaleClient', () => {
     expect(server.connectionCount).toBe(2);
   });
 
+  describe('stabilityRetryCount', () => {
+    it('retries after a stability timeout and succeeds on a later attempt', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 300,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      const readPromise = client.readStableWeight();
+      await server.waitForConnection();
+      // First attempt times out with no frame at all.
+
+      await server.waitForConnection(2);
+      server.send('ST,20000');
+
+      await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
+      expect(server.connectionCount).toBe(2);
+    });
+
+    it('gives up only after exhausting every attempt, and reports the cumulative waited time', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 200,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      const result = await client.readStableWeight();
+
+      expect(result).toMatchObject({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout' });
+      expect(result.waitedMs).toBeGreaterThanOrEqual(600);
+      expect(server.connectionCount).toBe(3);
+    });
+
+    it('does not retry by default (stabilityRetryCount defaults to 1)', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 200,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      await client.readStableWeight();
+
+      expect(server.connectionCount).toBe(1);
+    });
+
+    it('logs one warning per failed attempt, each tagged with its attempt number', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 200,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      await client.readStableWeight();
+
+      const warnLogs = calls.filter((c) => c.level === 'warn');
+      expect(warnLogs).toHaveLength(3);
+      expect(warnLogs.map((c) => c.obj.attempt)).toEqual([1, 2, 3]);
+      expect(warnLogs.every((c) => c.obj.stabilityRetryCount === 3)).toBe(true);
+    });
+  });
+
   describe('getStatus', () => {
     it('reports disconnected with no lastSeenAt before any read', () => {
       client = createTcpScaleClient({

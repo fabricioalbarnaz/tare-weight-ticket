@@ -197,11 +197,36 @@ the Admin UI for context.
   - Plate unreadable → same as entrance: logged, no automatic action, needs
     admin.
 - **Scale read timeout** (indicator never reports stable weight within a
-  bounded time, e.g. 15s): mark the relevant ticket leg with a
-  `weight_capture_failed` flag instead of silently storing a bad/unstable
-  number; still trigger the driver signal (truck shouldn't be stuck on the
-  scale because of a software hiccup) and require admin follow-up to fill
-  the weight in.
+  bounded time): retry up to `SCALE_STABILITY_RETRY_COUNT` times (default
+  3), each attempt reconnecting and bounded by `SCALE_STABILITY_TIMEOUT_MS`
+  (default 30s, field-validated 2026-10-27 — the previous 15s default was
+  the dominant cause of capture failures). A stable reading below
+  `SCALE_MIN_VALID_WEIGHT_KG` (default 500kg) is treated the same as an
+  unresolved read — it filters out a transient near-empty-platform reading
+  (e.g. right after the previous truck leaves) from ever being accepted as
+  a ticket's weight.
+  **Decision (2026-10-27, reverses the original rule below):** if every
+  attempt still fails, the relevant ticket leg is marked
+  `weight_capture_failed` and the driver signal is **withheld** — not
+  triggered. Once a truck leaves the scale its weight can never be
+  recovered, so releasing it without one is strictly worse than holding it;
+  the physical release at that point is a separate manual button an
+  operator presses on-site (no software alert yet — deferred, same as the
+  relay hardware in §7). On an **exit** read failure specifically, the
+  ticket also stays `OPEN` instead of closing with a null weight, so a
+  later successful exit read (camera re-trigger) or an admin's manual
+  correction (`PATCH /tickets/:id/exit`, unchanged) can still close it
+  normally — there's no second chance to weigh a truck that already left,
+  but there's no reason to foreclose one that's still sitting there mid-retry.
+  The original rule (superseded, kept here for history): "still trigger
+  the driver signal \[...] truck shouldn't be stuck on the scale because of
+  a software hiccup" — field reports (2026-10-27) of trucks sitting ~90s on
+  the scale (with capture still failing) showed that rule wasn't actually
+  preventing the "stuck truck" outcome it was meant to avoid, while also
+  letting an unrecoverable missing weight through silently. The new rule
+  bounds the automatic wait explicitly (retry count × timeout, ~90s worst
+  case at the new defaults) and, past that bound, accepts that a truck may
+  need manual operator release instead of guessing at a weight.
 - **Print** happens automatically exactly once per ticket transition into
   `CLOSED`, tracked via `printed_at` to avoid duplicate prints from retries;
   Admin UI can force a reprint explicitly.
@@ -581,12 +606,16 @@ the per-feature working plan is deleted after merge, per `CLAUDE.md`):
 Decisions and lessons from Phases 4–5:
 
 - **Driver signal fires right after the scale read, before the session
-  service is even called** — for *every* outcome (ticket opened/
-  retriggered/closed, anomaly, capture-failed, even a currently-unreadable
-  plate once the scale read already happened). The truck is physically on
-  the scale regardless of what the software decides about the ticket, so
-  it must never be left stuck there (same principle as the §5 timeout
-  rule, generalized to the whole entrance/exit flow).
+  service is even called** — for *every* outcome except a failed weight
+  capture (ticket opened/retriggered/closed, anomaly, a currently-
+  unreadable plate once the scale read already happened). The truck is
+  physically on the scale regardless of what the software decides about
+  the ticket, so it must never be left stuck there for a *software*
+  reason. **Decision (2026-10-27):** a *failed weight capture* (after
+  exhausting retries) is the one outcome this no longer applies to — see
+  the superseding decision in §5 under "Scale read timeout". The signal is
+  withheld in that one case specifically, not generalized to every outcome
+  as the original wording here said.
 - **The print bridge implements the master plan's documented *fallback*
   approach** (native process, localhost HTTP, outside Docker), not
   `usbipd-win` — that spike (§7 risk #1) hasn't happened and there's no

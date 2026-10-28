@@ -261,7 +261,7 @@ describe('SessionService — exit', () => {
     expect(auditActionsFor(result.ticket.id)).toEqual(['anomaly_flagged']);
   });
 
-  it('closes with a null net weight and exit_capture_failed on a scale timeout', () => {
+  it('leaves the ticket OPEN (never closes without a captured weight) on an exit scale timeout', () => {
     const entrance = service.handleEntranceReading({
       rawPlate: 'EXITFAIL',
       cameraId: 'cam-entrance-1',
@@ -281,11 +281,48 @@ describe('SessionService — exit', () => {
       weightCaptureFailed: true,
     });
 
-    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
-    expect(exit.ticket.status).toBe('CLOSED');
-    expect(exit.ticket.exitCaptureFailed).toBe(true);
+    if (exit.kind !== 'exit_capture_pending') throw new Error('unreachable');
+    expect(exit.ticket.status).toBe('OPEN');
+    expect(exit.ticket.exitCaptureFailed).toBe(false);
+    expect(exit.ticket.exitWeightKg).toBeNull();
     expect(exit.ticket.netWeightKg).toBeNull();
     expect(auditActionsFor(exit.ticket.id)).toEqual(['entry_captured', 'exit_capture_failed']);
+  });
+
+  it('closes a ticket that previously had a pending exit capture once a later exit read succeeds', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'RETRYOK1',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 15000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const failedExit = service.handleExitReading({
+      rawPlate: 'RETRYOK1',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+    });
+    if (failedExit.kind !== 'exit_capture_pending') throw new Error('unreachable');
+
+    const retriedExit = service.handleExitReading({
+      rawPlate: 'RETRYOK1',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 8000,
+      weightCaptureFailed: false,
+    });
+
+    if (retriedExit.kind !== 'ticket_closed') throw new Error('unreachable');
+    expect(retriedExit.ticket.id).toBe(entrance.ticket.id);
+    expect(retriedExit.ticket.status).toBe('CLOSED');
+    expect(retriedExit.ticket.netWeightKg).toBe(7000);
   });
 
   it('creates no ticket and logs a raw event when the exit plate is unreadable', () => {
@@ -352,7 +389,7 @@ describe('SessionService — exit', () => {
       failureReason: 'socket_error',
       waitedMs: 500,
     });
-    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
+    if (exit.kind !== 'exit_capture_pending') throw new Error('unreachable');
 
     const scaleEvents = scaleRawEventsFor(exit.ticket.id).filter((e) => e.direction === 'exit');
     expect(scaleEvents).toEqual([

@@ -69,9 +69,19 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       direction: 'entrance',
       plate: event.rawPlate,
     });
-    // The truck is on the scale regardless of the outcome below (missing
-    // ticket, failed capture, etc.) — it must never be left stuck there.
-    await options.driverSignalAdapter.signalDriver('in');
+    // Deliberate reversal of the earlier "always signal, truck never stuck"
+    // design: once a weight is never recoverable after the truck leaves the
+    // scale, releasing it without one is worse than holding it — the
+    // operator's manual release button is the only way forward from here
+    // until the record is corrected (see docs/plans/2026-10-27-...).
+    if (weightCaptureFailed) {
+      request.log.warn(
+        { plate: event.rawPlate, failureReason },
+        'camera: entrance weight capture failed, withholding driver signal — truck held pending manual correction',
+      );
+    } else {
+      await options.driverSignalAdapter.signalDriver('in');
+    }
 
     const result = options.sessionService.handleEntranceReading({
       rawPlate: event.rawPlate,
@@ -109,7 +119,15 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       direction: 'exit',
       plate: event.rawPlate,
     });
-    await options.driverSignalAdapter.signalDriver('out');
+    // See the matching comment in the entrance handler.
+    if (weightCaptureFailed) {
+      request.log.warn(
+        { plate: event.rawPlate, failureReason },
+        'camera: exit weight capture failed, withholding driver signal — truck held pending manual correction',
+      );
+    } else {
+      await options.driverSignalAdapter.signalDriver('out');
+    }
 
     const result = options.sessionService.handleExitReading({
       rawPlate: event.rawPlate,

@@ -183,7 +183,7 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(repo.findOpenByPlate('RET1234')?.entryWeightKg).toBe(19500);
   });
 
-  it('records entryCaptureFailed when the scale times out', async () => {
+  it('records entryCaptureFailed when the scale times out, and withholds the driver signal', async () => {
     nextScaleReading = { weightKg: null, weightCaptureFailed: true };
 
     await postEntrance({ plate: 'TIME001' });
@@ -191,6 +191,10 @@ describe('POST /webhooks/camera/entrance', () => {
     const ticket = repo.findOpenByPlate('TIME001');
     expect(ticket?.entryWeightKg).toBeNull();
     expect(ticket?.entryCaptureFailed).toBe(true);
+    // Never auto-release without a captured weight — the truck stays held
+    // until an operator corrects the record (manual release button, not
+    // modeled here).
+    expect(driverSignalCalls).toEqual([]);
   });
 
   it('creates no ticket when the plate is missing from the payload', async () => {
@@ -271,17 +275,25 @@ describe('POST /webhooks/camera/exit', () => {
     expect(printCalls).toBe(0);
   });
 
-  it('records exitCaptureFailed when the scale times out', async () => {
+  it('leaves the ticket OPEN and withholds the driver signal when the exit scale read times out', async () => {
     nextScaleReading = { weightKg: 15000, weightCaptureFailed: false };
     await postEntrance({ plate: 'EXITFAI' });
 
     nextScaleReading = { weightKg: null, weightCaptureFailed: true };
     const exit = await postExit({ plate: 'EXITFAI' });
 
+    // Never auto-close/release without a captured weight — there is no way
+    // to re-weigh the truck once it has left the scale, so the ticket is
+    // left OPEN, waiting for a later successful exit read or a manual
+    // admin correction (PATCH /tickets/:id/exit already closes an OPEN
+    // ticket, unchanged).
+    expect(exit.json().kind).toBe('exit_capture_pending');
     const ticket = repo.findById(exit.json().ticketId);
-    expect(ticket?.status).toBe('CLOSED');
-    expect(ticket?.exitCaptureFailed).toBe(true);
+    expect(ticket?.status).toBe('OPEN');
+    expect(ticket?.exitCaptureFailed).toBe(false);
     expect(ticket?.netWeightKg).toBeNull();
+    expect(driverSignalCalls).toEqual(['in']);
+    expect(printCalls).toBe(0);
   });
 
   it('creates no ticket when the plate is missing from the payload', async () => {

@@ -16,6 +16,13 @@ export interface ScaleClientOptions {
   stabilityTimeoutMs: number;
   /** Separate, usually shorter, bound for establishing the TCP connection itself. */
   connectTimeoutMs?: number;
+  /**
+   * Attempts (each bounded by stabilityTimeoutMs, reconnecting in between)
+   * before giving up and returning a failed ScaleReadResult. Defaults to 1
+   * (no retry) so existing single-attempt callers/tests are unaffected;
+   * production wiring passes ScaleConfig's own stabilityRetryCount.
+   */
+  stabilityRetryCount?: number;
   createParser: () => ScaleFrameParser;
   /** Defaults to a no-op logger (used by tests that don't care about log output). */
   logger?: ScaleLogger;
@@ -42,6 +49,7 @@ class ScaleConnectFailure extends Error {
 
 export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   const connectTimeoutMs = options.connectTimeoutMs ?? 5000;
+  const stabilityRetryCount = options.stabilityRetryCount ?? 1;
   const logger = options.logger ?? noopLogger;
   const endpoint = { host: options.host, port: options.port };
 
@@ -125,9 +133,15 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     return connectPromise;
   }
 
-  async function readOne(context?: ScaleReadContext): Promise<ScaleReadResult> {
+  async function readOne(context: ScaleReadContext | undefined, attempt: number): Promise<ScaleReadResult> {
     const log = context?.logger ?? logger;
-    const meta = { ...endpoint, direction: context?.direction, plate: context?.plate };
+    const meta = {
+      ...endpoint,
+      direction: context?.direction,
+      plate: context?.plate,
+      attempt,
+      stabilityRetryCount,
+    };
     const startedAt = Date.now();
 
     try {
@@ -175,9 +189,23 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     });
   }
 
+  async function readWithRetries(context?: ScaleReadContext): Promise<ScaleReadResult> {
+    let result: ScaleReadResult = { weightKg: null, weightCaptureFailed: true };
+    let totalWaitedMs = 0;
+
+    for (let attempt = 1; attempt <= stabilityRetryCount; attempt += 1) {
+      result = await readOne(context, attempt);
+      totalWaitedMs += result.waitedMs ?? 0;
+
+      if (!result.weightCaptureFailed) break;
+    }
+
+    return { ...result, waitedMs: totalWaitedMs };
+  }
+
   return {
     readStableWeight(context?: ScaleReadContext): Promise<ScaleReadResult> {
-      const run = (): Promise<ScaleReadResult> => readOne(context);
+      const run = (): Promise<ScaleReadResult> => readWithRetries(context);
       const result = readQueue.then(run, run);
       readQueue = result;
       return result;

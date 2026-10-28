@@ -6,10 +6,12 @@ describe('loadScaleConfig', () => {
     expect(loadScaleConfig({})).toEqual({
       host: '127.0.0.1',
       port: 9000,
-      stabilityTimeoutMs: 15000,
+      stabilityTimeoutMs: 30000,
       connectTimeoutMs: 5000,
       stabilityReadingCount: 3,
       stabilitySampleIntervalMs: 2000,
+      stabilityRetryCount: 3,
+      minValidWeightKg: 500,
     });
   });
 
@@ -22,6 +24,8 @@ describe('loadScaleConfig', () => {
         SCALE_CONNECT_TIMEOUT_MS: '3000',
         SCALE_STABILITY_READING_COUNT: '5',
         SCALE_STABILITY_SAMPLE_INTERVAL_MS: '1000',
+        SCALE_STABILITY_RETRY_COUNT: '4',
+        SCALE_MIN_VALID_WEIGHT_KG: '800',
       }),
     ).toEqual({
       host: '10.0.0.5',
@@ -30,6 +34,8 @@ describe('loadScaleConfig', () => {
       connectTimeoutMs: 3000,
       stabilityReadingCount: 5,
       stabilitySampleIntervalMs: 1000,
+      stabilityRetryCount: 4,
+      minValidWeightKg: 800,
     });
   });
 

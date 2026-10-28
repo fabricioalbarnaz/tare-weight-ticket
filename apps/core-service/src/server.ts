@@ -47,11 +47,13 @@ const scaleClient = createTcpScaleClient({
   port: scaleConfig.port,
   stabilityTimeoutMs: scaleConfig.stabilityTimeoutMs,
   connectTimeoutMs: scaleConfig.connectTimeoutMs,
+  stabilityRetryCount: scaleConfig.stabilityRetryCount,
   logger: logger.child({ component: 'scale-client' }),
   createParser: () =>
     createDgnFrameParser({
       requiredMatches: scaleConfig.stabilityReadingCount,
       sampleIntervalMs: scaleConfig.stabilitySampleIntervalMs,
+      minValidWeightKg: scaleConfig.minValidWeightKg,
       logger: logger.child({ component: 'dgn-frame-parser' }),
     }),
 });

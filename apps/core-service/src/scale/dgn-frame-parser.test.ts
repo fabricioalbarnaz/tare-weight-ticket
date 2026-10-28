@@ -49,17 +49,52 @@ describe('createDgnFrameParser', () => {
     expect(parser.push(Buffer.from(frame('D', 59080)))).toEqual([{ weightKg: 59080, stable: true }]);
   });
 
-  it('treats F (empty platform) the same as D for stability', () => {
+  it('treats F the same as D for stability', () => {
     const clock = createClock();
     const parser = createDgnFrameParser({ now: clock.now });
 
     for (let i = 0; i < 3; i += 1) {
       clock.advance(2000);
-      parser.push(Buffer.from(frame('F', 0)));
+      parser.push(Buffer.from(frame('F', 59080)));
     }
 
     clock.advance(2000);
-    expect(parser.push(Buffer.from(frame('F', 0)))).toEqual([{ weightKg: 0, stable: true }]);
+    expect(parser.push(Buffer.from(frame('F', 59080)))).toEqual([{ weightKg: 59080, stable: true }]);
+  });
+
+  it('never counts a weight below the minimum valid threshold (e.g. an empty platform between trucks) and resets the streak', () => {
+    const clock = createClock();
+    const parser = createDgnFrameParser({ now: clock.now, minValidWeightKg: 500 });
+
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('D', 0)))).toEqual([{ weightKg: 0, stable: false }]);
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('F', 0)))).toEqual([{ weightKg: 0, stable: false }]);
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('D', 120)))).toEqual([{ weightKg: 120, stable: false }]);
+
+    // The streak must restart from zero once a weight at/above the
+    // threshold starts arriving — three more matches are needed.
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('D', 59080)))).toEqual([{ weightKg: 59080, stable: false }]);
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('D', 59080)))).toEqual([{ weightKg: 59080, stable: false }]);
+    clock.advance(2000);
+    expect(parser.push(Buffer.from(frame('D', 59080)))).toEqual([{ weightKg: 59080, stable: true }]);
+  });
+
+  it('logs a warning when a weight below the minimum valid threshold is discarded', () => {
+    const clock = createClock();
+    const { logger, calls } = createCapturingLogger();
+    const parser = createDgnFrameParser({ now: clock.now, logger, minValidWeightKg: 500 });
+
+    clock.advance(2000);
+    const frames = parser.push(Buffer.from(frame('D', 120)));
+
+    expect(frames).toEqual([{ weightKg: 120, stable: false }]);
+    const warnings = calls.filter((c) => c.level === 'warn');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.obj).toEqual({ weightKg: 120, minValidWeightKg: 500 });
   });
 
   it('never counts @ (oscillating) frames and resets any streak in progress', () => {

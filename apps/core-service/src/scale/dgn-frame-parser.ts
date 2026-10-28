@@ -45,6 +45,14 @@ export interface DgnFrameParserOptions {
   sampleIntervalMs?: number;
   /** Number of matching, spaced-apart readings required before a weight is accepted as stable. Default 3. */
   requiredMatches?: number;
+  /**
+   * A stable-looking reading below this is never accepted — guards against
+   * a transient near-empty-platform reading (e.g. right after the previous
+   * truck leaves, before the next one is fully positioned) settling into a
+   * false "stable" weight. Default 500 (kg), matching ScaleConfig's own
+   * default.
+   */
+  minValidWeightKg?: number;
   /** Injectable clock, for deterministic tests without fake timers. Defaults to Date.now. */
   now?: () => number;
   /**
@@ -58,6 +66,7 @@ export interface DgnFrameParserOptions {
 export function createDgnFrameParser(options: DgnFrameParserOptions = {}): ScaleFrameParser {
   const sampleIntervalMs = options.sampleIntervalMs ?? 2000;
   const requiredMatches = options.requiredMatches ?? 3;
+  const minValidWeightKg = options.minValidWeightKg ?? 500;
   const now = options.now ?? Date.now;
   const logger = options.logger ?? noopLogger;
 
@@ -85,6 +94,18 @@ export function createDgnFrameParser(options: DgnFrameParserOptions = {}): Scale
 
     const weightKg = Number(digits);
     if (!Number.isFinite(weightKg)) return undefined;
+
+    if (weightKg < minValidWeightKg) {
+      // Same fail-safe treatment as an unconfirmed status byte: never
+      // counts toward stability, and breaks any streak in progress.
+      logger.warn(
+        { weightKg, minValidWeightKg },
+        'scale: weight below minimum valid threshold, not counted toward stability',
+      );
+      currentValue = null;
+      matchCount = 0;
+      return { weightKg, stable: false };
+    }
 
     if (!CANDIDATE_STATUSES.has(statusByte)) {
       // `@` (oscillating) or any byte not yet confirmed (`B`, `H`, ...):

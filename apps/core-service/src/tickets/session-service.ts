@@ -57,6 +57,7 @@ export interface ExitReadingInput {
 
 export type ExitResult =
   | { kind: 'ticket_closed'; ticket: Ticket }
+  | { kind: 'exit_capture_pending'; ticket: Ticket }
   | { kind: 'anomaly_flagged'; ticket: Ticket }
   | { kind: 'plate_unreadable' };
 
@@ -144,20 +145,45 @@ export function createSessionService(repo: TicketRepository): SessionService {
         const existing = repo.findOpenByPlate(plate);
 
         if (existing) {
+          // A failed capture never closes the ticket — there's no way to
+          // re-weigh a truck once it has left the scale, so the ticket
+          // stays OPEN, waiting for either a later successful exit read
+          // (camera re-trigger) or a manual admin correction (which already
+          // closes an OPEN ticket via PATCH /tickets/:id/exit, unchanged).
+          if (input.weightCaptureFailed) {
+            repo.appendAuditLog(existing.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED, {
+              weightKg: input.weightKg,
+              cameraId: input.cameraId,
+            });
+            repo.recordRawEvent(
+              'camera_exit',
+              { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+              existing.id,
+            );
+            repo.recordRawEvent(
+              'scale',
+              {
+                direction: 'exit',
+                weightKg: input.weightKg,
+                weightCaptureFailed: input.weightCaptureFailed,
+                failureReason: input.failureReason,
+                waitedMs: input.waitedMs,
+              },
+              existing.id,
+            );
+            return { kind: 'exit_capture_pending', ticket: existing };
+          }
+
           const ticket = repo.close(existing.id, {
             exitAt: input.receivedAt,
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,
-            exitCaptureFailed: input.weightCaptureFailed,
+            exitCaptureFailed: false,
           });
-          repo.appendAuditLog(
-            ticket.id,
-            'system',
-            input.weightCaptureFailed
-              ? TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED
-              : TICKET_AUDIT_ACTIONS.EXIT_CAPTURED,
-            { weightKg: input.weightKg, cameraId: input.cameraId },
-          );
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_CAPTURED, {
+            weightKg: input.weightKg,
+            cameraId: input.cameraId,
+          });
           repo.recordRawEvent(
             'camera_exit',
             {
@@ -173,7 +199,7 @@ export function createSessionService(repo: TicketRepository): SessionService {
             {
               direction: 'exit',
               weightKg: input.weightKg,
-              weightCaptureFailed: input.weightCaptureFailed,
+              weightCaptureFailed: false,
               failureReason: input.failureReason,
               waitedMs: input.waitedMs,
             },
