@@ -16,6 +16,7 @@
     "dashboard": "Painel",
     "history": "Histórico",
     "unresolvedEvents": "Eventos Não Resolvidos",
+    "internalTrucks": "Caminhões Internos",
     "hardwareStatus": "Status do Equipamento",
     "logout": "Sair"
   },
@@ -96,6 +97,44 @@
       "scale": "Balança"
     }
   },
+  "internalTrucks": {
+    "title": "Caminhões internos",
+    "description": "Caminhões da empresa com tara pré-cadastrada. A leitura de uma dessas placas fecha o ticket a partir de um único evento — a perna que não disparou usa a tara do conjunto ativo. Um conjunto (tipo de carreta/implemento) pode ser compartilhado por vários caminhões, cada um com sua própria tara.",
+    "newTruck": "Novo caminhão",
+    "createHeading": "Cadastrar caminhão interno",
+    "loadError": "Não foi possível carregar os caminhões internos.",
+    "empty": "Nenhum caminhão interno cadastrado ainda.",
+    "table": {
+      "plate": "Placa",
+      "label": "Rótulo",
+      "activeTare": "Tara ativa",
+      "tareWithLabel": "{{label}} — {{tareWeightKg}} kg",
+      "noActiveTare": "Nenhum conjunto ativo",
+      "manage": "Gerenciar"
+    }
+  },
+  "truckDetail": {
+    "loading": "Carregando caminhão…",
+    "notFound": "Caminhão não encontrado.",
+    "backToList": "← Voltar aos caminhões internos",
+    "heading": "Caminhão {{plate}}",
+    "conjuntosHeading": "Conjuntos cadastrados",
+    "conjuntosDescription": "Tipos de carreta/implemento já atribuídos a este caminhão, cada um com sua própria tara. Apenas um fica ativo por vez.",
+    "noConjuntos": "Nenhum conjunto atribuído ainda a este caminhão.",
+    "tareWeight": "{{tareWeightKg}} kg",
+    "active": "Ativo",
+    "activate": "Ativar",
+    "assignConjuntoHeading": "Atribuir um conjunto",
+    "assignConjuntoDescription": "Escolha um conjunto existente (compartilhado entre caminhões) ou crie um novo, e defina a tara deste caminhão para ele.",
+    "auditTrail": "Trilha de auditoria"
+  },
+  "truckAuditLog": {
+    "actions": {
+      "truck_created": "Caminhão cadastrado",
+      "conjunto_assigned": "Conjunto atribuído",
+      "conjunto_activated": "Conjunto ativado"
+    }
+  },
   "auditLog": {
     "empty": "Ainda não há registros de auditoria.",
     "by": "por {{actor}}",
@@ -156,6 +195,31 @@
       "printing": "Imprimindo…",
       "cancel": "Cancelar",
       "error": "Falha ao reimprimir."
+    },
+    "createTruck": {
+      "plate": "Placa",
+      "label": "Rótulo (opcional)",
+      "submit": "Cadastrar caminhão",
+      "submitting": "Cadastrando…",
+      "error": "Não foi possível cadastrar o caminhão. Tente novamente.",
+      "validation": {
+        "plate": "Informe a placa"
+      }
+    },
+    "assignConjunto": {
+      "conjunto": "Conjunto",
+      "selectPlaceholder": "Selecione um conjunto…",
+      "newConjuntoOption": "+ Novo conjunto…",
+      "newConjuntoName": "Nome do novo conjunto",
+      "tareWeight": "Tara deste caminhão no conjunto (kg)",
+      "submit": "Atribuir conjunto",
+      "submitting": "Atribuindo…",
+      "error": "Não foi possível atribuir o conjunto. Tente novamente.",
+      "validation": {
+        "conjunto": "Selecione um conjunto ou crie um novo",
+        "newConjuntoName": "Informe um nome para o novo conjunto",
+        "weightPositive": "O peso deve ser maior que 0"
+      }
     }
   },
   "tickets": {

@@ -6,10 +6,14 @@ import type { PrintClient } from '../printing/print-client.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { ScaleClient } from '../scale/types.js';
 import type { TicketRepository } from '../tickets/repository.js';
+import type { TruckRepository } from '../trucks/repository.js';
 import { createAdminAuthService } from './auth-service.js';
 import { getHardwareStatus } from './hardware-status.js';
 import {
+  assignConjuntoBodySchema,
+  createConjuntoBodySchema,
   createTicketBodySchema,
+  createTruckBodySchema,
   editEntryBodySchema,
   editExitBodySchema,
   listTicketsQuerySchema,
@@ -17,7 +21,12 @@ import {
   loginBodySchema,
   reprintBodySchema,
   ticketIdParamsSchema,
+  truckConjuntoIdParamsSchema,
+  truckIdParamsSchema,
+  type AssignConjuntoBody,
+  type CreateConjuntoBody,
   type CreateTicketBody,
+  type CreateTruckBody,
   type EditEntryBody,
   type EditExitBody,
   type ListTicketsQuery,
@@ -25,12 +34,22 @@ import {
   type LoginBody,
   type ReprintBody,
   type TicketIdParams,
+  type TruckConjuntoIdParams,
+  type TruckIdParams,
 } from './schemas.js';
-import { serializeAuditLogEntry, serializeRawEvent, serializeTicket } from './serialize.js';
+import {
+  serializeAuditLogEntry,
+  serializeConjunto,
+  serializeRawEvent,
+  serializeTicket,
+  serializeTruck,
+  serializeTruckAuditLogEntry,
+} from './serialize.js';
 import './session.js';
 
 export interface AdminRoutesOptions {
   repo: TicketRepository;
+  truckRepo: TruckRepository;
   printService: PrintService;
   scaleClient: ScaleClient;
   driverSignalAdapter: DriverSignalAdapter;
@@ -44,6 +63,12 @@ const AUDIT_ACTIONS = {
   ENTRY_EDITED: 'entry_edited',
   EXIT_EDITED: 'exit_edited',
   REPRINT_REQUESTED: 'reprint_requested',
+} as const;
+
+const TRUCK_AUDIT_ACTIONS = {
+  TRUCK_CREATED: 'truck_created',
+  CONJUNTO_ASSIGNED: 'conjunto_assigned',
+  CONJUNTO_ACTIVATED: 'conjunto_activated',
 } as const;
 
 /**
@@ -297,6 +322,142 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             page: result.page,
             pageSize: result.pageSize,
           });
+        },
+      );
+
+      // --- Internal trucks / conjuntos (master plan §11) ---
+      // A conjunto is a shared rig/trailer type (many trucks can use the
+      // same one); the tare belongs to the (truck, conjunto) assignment,
+      // not the conjunto itself — confirmed against the real paper
+      // registry the company uses today.
+
+      instance.get('/conjuntos', { preHandler: requireAuth }, async (_request, reply) => {
+        reply.send(options.truckRepo.listConjuntos().map(serializeConjunto));
+      });
+
+      instance.get('/trucks', { preHandler: requireAuth }, async (_request, reply) => {
+        const trucks = options.truckRepo.listTrucks();
+        reply.send(trucks.map((truck) => serializeTruck(truck, options.truckRepo.listTruckConjuntos(truck.id))));
+      });
+
+      instance.get<{ Params: TruckIdParams }>(
+        '/trucks/:id',
+        { schema: { params: truckIdParamsSchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const truckId = Number(request.params.id);
+          const truck = options.truckRepo.findTruckById(truckId);
+          if (!truck) {
+            reply.code(404).send('Truck not found');
+            return;
+          }
+          reply.send({
+            truck: serializeTruck(truck, options.truckRepo.listTruckConjuntos(truckId)),
+            auditLog: options.truckRepo.findAuditLogByTruckId(truckId).map(serializeTruckAuditLogEntry),
+          });
+        },
+      );
+
+      instance.post<{ Body: CreateTruckBody }>(
+        '/trucks',
+        { schema: { body: createTruckBodySchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const { plate, label } = request.body;
+          const actor = request.session.adminUsername!;
+
+          const truck = options.truckRepo.transaction(() => {
+            const created = options.truckRepo.createTruck({ plate, label });
+            options.truckRepo.appendAuditLog(created.id, actor, TRUCK_AUDIT_ACTIONS.TRUCK_CREATED, {
+              plate,
+              label,
+            });
+            return created;
+          });
+
+          reply.code(201).send({ truck: serializeTruck(truck, []) });
+        },
+      );
+
+      instance.post<{ Body: CreateConjuntoBody }>(
+        '/conjuntos',
+        { schema: { body: createConjuntoBodySchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const existing = options.truckRepo.findConjuntoByName(request.body.name);
+          if (existing) {
+            reply.code(409).send('A conjunto with this name already exists');
+            return;
+          }
+          const conjunto = options.truckRepo.createConjunto({ name: request.body.name });
+          reply.code(201).send({ conjunto: serializeConjunto(conjunto) });
+        },
+      );
+
+      instance.post<{ Params: TruckIdParams; Body: AssignConjuntoBody }>(
+        '/trucks/:id/conjuntos',
+        { schema: { params: truckIdParamsSchema, body: assignConjuntoBodySchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const truckId = Number(request.params.id);
+          const truck = options.truckRepo.findTruckById(truckId);
+          if (!truck) {
+            reply.code(404).send('Truck not found');
+            return;
+          }
+
+          const { conjuntoId, conjuntoName, tareWeightKg } = request.body;
+          if (!conjuntoId && !conjuntoName) {
+            reply.code(400).send('Either conjuntoId or conjuntoName is required');
+            return;
+          }
+          const actor = request.session.adminUsername!;
+
+          options.truckRepo.transaction(() => {
+            const conjunto = conjuntoId
+              ? options.truckRepo.findConjuntoById(conjuntoId)
+              : (options.truckRepo.findConjuntoByName(conjuntoName!) ??
+                options.truckRepo.createConjunto({ name: conjuntoName! }));
+            if (!conjunto) {
+              throw new Error(`Conjunto ${conjuntoId} not found`);
+            }
+
+            const assignment = options.truckRepo.assignConjuntoToTruck({
+              truckId,
+              conjuntoId: conjunto.id,
+              tareWeightKg,
+            });
+            options.truckRepo.appendAuditLog(truckId, actor, TRUCK_AUDIT_ACTIONS.CONJUNTO_ASSIGNED, {
+              truckConjuntoId: assignment.id,
+              conjuntoName: conjunto.name,
+              tareWeightKg,
+            });
+          });
+
+          reply.code(201).send({ truck: serializeTruck(truck, options.truckRepo.listTruckConjuntos(truckId)) });
+        },
+      );
+
+      instance.post<{ Params: TruckConjuntoIdParams }>(
+        '/truck-conjuntos/:id/activate',
+        { schema: { params: truckConjuntoIdParamsSchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const truckConjuntoId = Number(request.params.id);
+          const existing = options.truckRepo.findTruckConjuntoById(truckConjuntoId);
+          if (!existing) {
+            reply.code(404).send('Truck conjunto assignment not found');
+            return;
+          }
+
+          const actor = request.session.adminUsername!;
+          const truckId = existing.truckId;
+
+          options.truckRepo.transaction(() => {
+            options.truckRepo.activateTruckConjunto(truckConjuntoId);
+            options.truckRepo.appendAuditLog(truckId, actor, TRUCK_AUDIT_ACTIONS.CONJUNTO_ACTIVATED, {
+              truckConjuntoId,
+              tareWeightKg: existing.tareWeightKg,
+            });
+          });
+
+          const truck = options.truckRepo.findTruckById(truckId)!;
+          reply.send({ truck: serializeTruck(truck, options.truckRepo.listTruckConjuntos(truckId)) });
         },
       );
 

@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import type { Db } from './db/client.js';
 import { createTicketRepository } from './tickets/repository.js';
 import { createSessionService } from './tickets/session-service.js';
+import { createTruckRepository } from './trucks/repository.js';
 import type { ScaleClient } from './scale/types.js';
 import type { DriverSignalAdapter } from './driver-signal/types.js';
 import type { PrintClient } from './printing/print-client.js';
@@ -41,7 +42,8 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app = options.logger ? Fastify({ loggerInstance: options.logger }) : Fastify({ logger: true });
 
   const repo = createTicketRepository(options.db);
-  const sessionService = createSessionService(repo);
+  const truckRepo = createTruckRepository(options.db);
+  const sessionService = createSessionService(repo, truckRepo);
   const printService = createPrintService(repo, options.printClient);
 
   // Generous fileSize limit: the camera's ANPR push carries three JPEGs
@@ -64,6 +66,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerAdminRoutes(app, {
     repo,
+    truckRepo,
     printService,
     scaleClient: options.scaleClient,
     driverSignalAdapter: options.driverSignalAdapter,

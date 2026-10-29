@@ -84,6 +84,14 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       waitedMs,
     });
 
+    // Internal trucks (master plan §11) can close a ticket right on the
+    // entrance leg — the exit leg comes from the registered tare, not a
+    // later webhook — so printing has to be triggered here too, not just
+    // in the exit handler below.
+    if (result.kind === 'ticket_closed_via_tare') {
+      await options.printService.printIfNeeded(result.ticket);
+    }
+
     reply.send(toResponseBody(result));
   });
 

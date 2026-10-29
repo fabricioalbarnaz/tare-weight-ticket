@@ -393,3 +393,203 @@ describe('GET /api/admin/status', () => {
     expect(body.printBridge).toEqual({ reachable: true, lastSeenAt: null });
   });
 });
+
+describe('Internal trucks / conjuntos', () => {
+  async function createTruck(cookie: string, plate: string, label?: string): Promise<number> {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/trucks',
+      headers: { cookie },
+      payload: label ? { plate, label } : { plate },
+    });
+    return response.json().truck.id;
+  }
+
+  it('requires authentication', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/admin/trucks' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('creates a truck, lists it, and fetches its detail with an empty audit log at first', async () => {
+    const cookie = await loginCookie();
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/trucks',
+      headers: { cookie },
+      payload: { plate: 'INT0001', label: 'Caminhão 1' },
+    });
+    expect(created.statusCode).toBe(201);
+    const truckId = created.json().truck.id;
+
+    const list = await app.inject({ method: 'GET', url: '/api/admin/trucks', headers: { cookie } });
+    expect(list.json()).toEqual([
+      expect.objectContaining({ id: truckId, plate: 'INT0001', label: 'Caminhão 1', conjuntos: [] }),
+    ]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/trucks/${truckId}`,
+      headers: { cookie },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().truck.conjuntos).toEqual([]);
+    expect(detail.json().auditLog).toHaveLength(1);
+    expect(detail.json().auditLog[0].action).toBe('truck_created');
+  });
+
+  it('returns 404 for a truck that does not exist', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({ method: 'GET', url: '/api/admin/trucks/999999', headers: { cookie } });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('creates a conjunto, lists shared conjuntos, and rejects a duplicate name', async () => {
+    const cookie = await loginCookie();
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/conjuntos',
+      headers: { cookie },
+      payload: { name: 'Vanderleia' },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const list = await app.inject({ method: 'GET', url: '/api/admin/conjuntos', headers: { cookie } });
+    expect(list.json()).toEqual([expect.objectContaining({ name: 'Vanderleia' })]);
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/admin/conjuntos',
+      headers: { cookie },
+      payload: { name: 'Vanderleia' },
+    });
+    expect(duplicate.statusCode).toBe(409);
+  });
+
+  it('assigns a new (inline-created) conjunto to a truck by name', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0002');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckId}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoName: 'Conjunto A', tareWeightKg: 8000 },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().truck.conjuntos).toEqual([
+      expect.objectContaining({ conjuntoName: 'Conjunto A', tareWeightKg: 8000, isActive: false }),
+    ]);
+  });
+
+  it('assigns the same shared conjunto to two trucks with different tares each', async () => {
+    const cookie = await loginCookie();
+    const conjunto = await app.inject({
+      method: 'POST',
+      url: '/api/admin/conjuntos',
+      headers: { cookie },
+      payload: { name: 'Bitrem Bicaçamba' },
+    });
+    const conjuntoId = conjunto.json().conjunto.id;
+
+    const truckA = await createTruck(cookie, 'INT0003');
+    const truckB = await createTruck(cookie, 'INT0004');
+
+    const assignA = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckA}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoId, tareWeightKg: 22860 },
+    });
+    const assignB = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckB}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoId, tareWeightKg: 20800 },
+    });
+
+    expect(assignA.json().truck.conjuntos[0]).toEqual(
+      expect.objectContaining({ conjuntoId, tareWeightKg: 22860 }),
+    );
+    expect(assignB.json().truck.conjuntos[0]).toEqual(
+      expect.objectContaining({ conjuntoId, tareWeightKg: 20800 }),
+    );
+  });
+
+  it('rejects assigning a conjunto with neither conjuntoId nor conjuntoName', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0005');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckId}/conjuntos`,
+      headers: { cookie },
+      payload: { tareWeightKg: 8000 },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('activates a conjunto assignment and deactivates any other assignment of the same truck', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0006');
+
+    const assignmentA = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckId}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoName: 'A', tareWeightKg: 8000 },
+    });
+    const assignmentAId = assignmentA.json().truck.conjuntos[0].id;
+
+    const assignmentB = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckId}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoName: 'B', tareWeightKg: 8500 },
+    });
+    const assignmentBId = assignmentB.json().truck.conjuntos.find(
+      (c: { conjuntoName: string }) => c.conjuntoName === 'B',
+    ).id;
+
+    await app.inject({
+      method: 'POST',
+      url: `/api/admin/truck-conjuntos/${assignmentAId}/activate`,
+      headers: { cookie },
+    });
+    const afterActivatingB = await app.inject({
+      method: 'POST',
+      url: `/api/admin/truck-conjuntos/${assignmentBId}/activate`,
+      headers: { cookie },
+    });
+
+    const assignments = afterActivatingB.json().truck.conjuntos as Array<{ id: number; isActive: boolean }>;
+    expect(assignments.find((a) => a.id === assignmentAId)?.isActive).toBe(false);
+    expect(assignments.find((a) => a.id === assignmentBId)?.isActive).toBe(true);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/trucks/${truckId}`,
+      headers: { cookie },
+    });
+    expect(detail.json().auditLog.map((e: { action: string }) => e.action)).toEqual([
+      'conjunto_activated',
+      'conjunto_activated',
+      'conjunto_assigned',
+      'conjunto_assigned',
+      'truck_created',
+    ]);
+  });
+
+  it('returns 404 when activating a conjunto assignment that does not exist', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/truck-conjuntos/999999/activate',
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+});

@@ -1,9 +1,13 @@
 import type {
   AuditLogEntry,
+  Conjunto,
   CurrentUser,
   HardwareStatus,
   RawEvent,
   Ticket,
+  Truck,
+  TruckAuditLogEntry,
+  TruckConjunto,
 } from '../types';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -18,6 +22,10 @@ let nextTicketId = 1;
 let nextTicketNumber = 1001;
 let nextAuditLogId = 1;
 let nextRawEventId = 1;
+let nextTruckId = 1;
+let nextConjuntoId = 1;
+let nextTruckConjuntoId = 1;
+let nextTruckAuditLogId = 1;
 
 function makeTicket(partial: Partial<Ticket> & Pick<Ticket, 'plate' | 'status'>): Ticket {
   const now = new Date().toISOString();
@@ -60,6 +68,9 @@ export interface FixtureStore {
   rawEvents: RawEvent[];
   status: HardwareStatus;
   session: CurrentUser | null;
+  trucks: Truck[];
+  conjuntos: Conjunto[];
+  truckAuditLog: TruckAuditLogEntry[];
 }
 
 function buildInitialStore(): FixtureStore {
@@ -67,6 +78,10 @@ function buildInitialStore(): FixtureStore {
   nextTicketNumber = 1001;
   nextAuditLogId = 1;
   nextRawEventId = 1;
+  nextTruckId = 1;
+  nextConjuntoId = 1;
+  nextTruckConjuntoId = 1;
+  nextTruckAuditLogId = 1;
 
   const open = makeTicket({
     plate: 'ABC1234',
@@ -185,7 +200,97 @@ function buildInitialStore(): FixtureStore {
     relay: { reachable: false, lastSeenAt: hoursAgo(6) },
   };
 
-  return { tickets, auditLog, rawEvents, status, session: null };
+  const now = new Date().toISOString();
+
+  // Two shared conjunto types, mirroring the company's real paper registry:
+  // "Vanderleia" is used by both trucks below, each with its own tare.
+  const conjuntoVanderleia: Conjunto = { id: nextConjuntoId++, name: 'Vanderleia', createdAt: now, updatedAt: now };
+  const conjuntoBicacamba: Conjunto = {
+    id: nextConjuntoId++,
+    name: 'Bitrem Bicaçamba',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const conjuntos = [conjuntoVanderleia, conjuntoBicacamba];
+
+  const truck1Id = nextTruckId++;
+  const truck1AssignmentVanderleia: TruckConjunto = {
+    id: nextTruckConjuntoId++,
+    truckId: truck1Id,
+    conjuntoId: conjuntoVanderleia.id,
+    conjuntoName: conjuntoVanderleia.name,
+    tareWeightKg: 20120,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const truck1AssignmentBicacamba: TruckConjunto = {
+    id: nextTruckConjuntoId++,
+    truckId: truck1Id,
+    conjuntoId: conjuntoBicacamba.id,
+    conjuntoName: conjuntoBicacamba.name,
+    tareWeightKg: 22860,
+    isActive: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const truck1: Truck = {
+    id: truck1Id,
+    plate: 'IZS7I76',
+    label: 'Caminhão interno 1',
+    createdAt: now,
+    updatedAt: now,
+    conjuntos: [truck1AssignmentVanderleia, truck1AssignmentBicacamba],
+  };
+
+  // Same "Vanderleia" conjunto, assigned to a different truck with a
+  // different tare — demonstrates the many-to-many relationship.
+  const truck2Id = nextTruckId++;
+  const truck2AssignmentVanderleia: TruckConjunto = {
+    id: nextTruckConjuntoId++,
+    truckId: truck2Id,
+    conjuntoId: conjuntoVanderleia.id,
+    conjuntoName: conjuntoVanderleia.name,
+    tareWeightKg: 20340,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const truck2: Truck = {
+    id: truck2Id,
+    plate: 'TQT1I39',
+    label: 'Caminhão interno 2',
+    createdAt: now,
+    updatedAt: now,
+    conjuntos: [truck2AssignmentVanderleia],
+  };
+
+  const trucks = [truck1, truck2];
+
+  const truckAuditLog: TruckAuditLogEntry[] = [
+    {
+      id: nextTruckAuditLogId++,
+      truckId: truck1.id,
+      actor: 'admin',
+      action: 'truck_created',
+      payload: { plate: truck1.plate, label: truck1.label },
+      createdAt: now,
+    },
+    {
+      id: nextTruckAuditLogId++,
+      truckId: truck1.id,
+      actor: 'admin',
+      action: 'conjunto_activated',
+      payload: {
+        truckConjuntoId: truck1AssignmentVanderleia.id,
+        conjuntoName: conjuntoVanderleia.name,
+        tareWeightKg: truck1AssignmentVanderleia.tareWeightKg,
+      },
+      createdAt: now,
+    },
+  ];
+
+  return { tickets, auditLog, rawEvents, status, session: null, trucks, conjuntos, truckAuditLog };
 }
 
 export const store: FixtureStore = buildInitialStore();
@@ -197,6 +302,9 @@ export function resetFixtures(): void {
   store.rawEvents = fresh.rawEvents;
   store.status = fresh.status;
   store.session = null;
+  store.trucks = fresh.trucks;
+  store.conjuntos = fresh.conjuntos;
+  store.truckAuditLog = fresh.truckAuditLog;
 }
 
 export function allocateTicketId(): number {
@@ -209,4 +317,20 @@ export function allocateTicketNumber(): number {
 
 export function allocateAuditLogId(): number {
   return nextAuditLogId++;
+}
+
+export function allocateTruckId(): number {
+  return nextTruckId++;
+}
+
+export function allocateConjuntoId(): number {
+  return nextConjuntoId++;
+}
+
+export function allocateTruckConjuntoId(): number {
+  return nextTruckConjuntoId++;
+}
+
+export function allocateTruckAuditLogId(): number {
+  return nextTruckAuditLogId++;
 }

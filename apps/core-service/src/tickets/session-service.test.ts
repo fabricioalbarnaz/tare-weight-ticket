@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '../db/client.js';
 import { ticketAuditLog, rawEvents } from '../db/schema.js';
+import { createTruckRepository, type TruckRepository } from '../trucks/repository.js';
 import { createTicketRepository, type TicketRepository } from './repository.js';
 import { createSessionService, type SessionService } from './session-service.js';
 
@@ -13,6 +14,7 @@ let dbPath: string;
 let sqlite: ReturnType<typeof createDb>['sqlite'];
 let db: Db;
 let repo: TicketRepository;
+let truckRepo: TruckRepository;
 let service: SessionService;
 
 beforeEach(() => {
@@ -21,7 +23,8 @@ beforeEach(() => {
   db = created.db;
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
-  service = createSessionService(repo);
+  truckRepo = createTruckRepository(db);
+  service = createSessionService(repo, truckRepo);
 });
 
 afterEach(() => {
@@ -379,5 +382,123 @@ describe('SessionService — exit', () => {
 
     const scaleEvents = scaleRawEventsFor(result.ticket.id);
     expect(scaleEvents).toEqual([{ direction: 'exit', weightKg: 9000, weightCaptureFailed: false }]);
+  });
+});
+
+describe('SessionService — internal trucks (pre-registered tare)', () => {
+  function registerTruckWithActiveTare(plate: string, tareWeightKg: number): void {
+    const truck = truckRepo.createTruck({ plate, label: 'Test truck' });
+    const conjunto = truckRepo.createConjunto({ name: `Conjunto ${plate}` });
+    const assignment = truckRepo.assignConjuntoToTruck({ truckId: truck.id, conjuntoId: conjunto.id, tareWeightKg });
+    truckRepo.activateTruckConjunto(assignment.id);
+  }
+
+  it('closes the ticket immediately on an entrance reading, using the active tare as the exit weight', () => {
+    registerTruckWithActiveTare('INT0001', 9000);
+
+    const result = service.handleEntranceReading({
+      rawPlate: 'int0001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:01Z'),
+      weightKg: 21000,
+      weightCaptureFailed: false,
+    });
+
+    expect(result.kind).toBe('ticket_closed_via_tare');
+    if (result.kind !== 'ticket_closed_via_tare') throw new Error('unreachable');
+    expect(result.ticket.status).toBe('CLOSED');
+    expect(result.ticket.entryWeightKg).toBe(21000);
+    expect(result.ticket.entryCameraId).toBe('cam-entrance-1');
+    expect(result.ticket.exitWeightKg).toBe(9000);
+    expect(result.ticket.exitCameraId).toBeNull();
+    expect(result.ticket.netWeightKg).toBe(12000);
+    expect(auditActionsFor(result.ticket.id)).toEqual([
+      'entry_captured',
+      'internal_truck_exit_via_tare',
+    ]);
+  });
+
+  it('closes the ticket immediately on an exit reading, using the active tare as the entry weight', () => {
+    registerTruckWithActiveTare('INT0002', 9000);
+
+    const result = service.handleExitReading({
+      rawPlate: 'int0002',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      receivedAt: new Date('2026-01-01T08:00:01Z'),
+      weightKg: 23000,
+      weightCaptureFailed: false,
+    });
+
+    expect(result.kind).toBe('ticket_closed');
+    if (result.kind !== 'ticket_closed') throw new Error('unreachable');
+    expect(result.ticket.status).toBe('CLOSED');
+    expect(result.ticket.entryWeightKg).toBe(9000);
+    expect(result.ticket.entryCameraId).toBeNull();
+    expect(result.ticket.exitWeightKg).toBe(23000);
+    expect(result.ticket.exitCameraId).toBe('cam-exit-1');
+    expect(result.ticket.netWeightKg).toBe(14000);
+    expect(auditActionsFor(result.ticket.id)).toEqual([
+      'internal_truck_entry_via_tare',
+      'exit_captured',
+    ]);
+  });
+
+  it('still closes via tare when the real leg scale capture fails, leaving net weight null', () => {
+    registerTruckWithActiveTare('INT0003', 9000);
+
+    const result = service.handleEntranceReading({
+      rawPlate: 'INT0003',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+    });
+
+    expect(result.kind).toBe('ticket_closed_via_tare');
+    if (result.kind !== 'ticket_closed_via_tare') throw new Error('unreachable');
+    expect(result.ticket.entryWeightKg).toBeNull();
+    expect(result.ticket.entryCaptureFailed).toBe(true);
+    expect(result.ticket.exitWeightKg).toBe(9000);
+    expect(result.ticket.netWeightKg).toBeNull();
+    expect(auditActionsFor(result.ticket.id)).toEqual([
+      'entry_capture_failed',
+      'internal_truck_exit_via_tare',
+    ]);
+  });
+
+  it('falls through to the normal external-truck flow when the internal truck has no active conjunto', () => {
+    truckRepo.createTruck({ plate: 'INT0004', label: 'No conjunto yet' });
+
+    const result = service.handleEntranceReading({
+      rawPlate: 'INT0004',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 18000,
+      weightCaptureFailed: false,
+    });
+
+    expect(result.kind).toBe('ticket_opened');
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+    expect(result.ticket.status).toBe('OPEN');
+    expect(auditActionsFor(result.ticket.id)).toEqual(['entry_captured']);
+  });
+
+  it('only ever creates one ticket per internal-truck event, never leaving one OPEN', () => {
+    registerTruckWithActiveTare('INT0005', 9000);
+
+    service.handleExitReading({
+      rawPlate: 'INT0005',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+
+    expect(repo.findOpenByPlate('INT0005')).toBeUndefined();
   });
 });

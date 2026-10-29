@@ -1,4 +1,5 @@
 import type { RawEvent, Ticket, TicketAuditLogEntry } from '../tickets/repository.js';
+import type { Conjunto, InternalTruck, TruckAuditLogEntry, TruckConjuntoWithName } from '../trucks/repository.js';
 
 /**
  * Wire shapes for the Admin API, matching `apps/admin-ui/src/api/types.ts`
@@ -85,5 +86,85 @@ export function serializeRawEvent(event: RawEvent): SerializedRawEvent {
     rawPayload: JSON.parse(event.rawPayload),
     receivedAt: event.receivedAt.toISOString(),
     linkedTicketId: event.linkedTicketId,
+  };
+}
+
+export interface SerializedConjunto {
+  id: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SerializedTruckConjunto {
+  id: number;
+  truckId: number;
+  conjuntoId: number;
+  conjuntoName: string;
+  tareWeightKg: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SerializedTruck {
+  id: number;
+  plate: string;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+  conjuntos: SerializedTruckConjunto[];
+}
+
+export interface SerializedTruckAuditLogEntry {
+  id: number;
+  truckId: number;
+  actor: string;
+  action: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+export function serializeConjunto(conjunto: Conjunto): SerializedConjunto {
+  return {
+    id: conjunto.id,
+    name: conjunto.name,
+    createdAt: conjunto.createdAt.toISOString(),
+    updatedAt: conjunto.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTruckConjunto(assignment: TruckConjuntoWithName): SerializedTruckConjunto {
+  return {
+    id: assignment.id,
+    truckId: assignment.truckId,
+    conjuntoId: assignment.conjuntoId,
+    conjuntoName: assignment.conjuntoName,
+    tareWeightKg: assignment.tareWeightKg,
+    isActive: assignment.isActive,
+    createdAt: assignment.createdAt.toISOString(),
+    updatedAt: assignment.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTruck(truck: InternalTruck, assignments: TruckConjuntoWithName[]): SerializedTruck {
+  return {
+    id: truck.id,
+    plate: truck.plate,
+    label: truck.label,
+    createdAt: truck.createdAt.toISOString(),
+    updatedAt: truck.updatedAt.toISOString(),
+    conjuntos: assignments.map(serializeTruckConjunto),
+  };
+}
+
+export function serializeTruckAuditLogEntry(entry: TruckAuditLogEntry): SerializedTruckAuditLogEntry {
+  return {
+    id: entry.id,
+    truckId: entry.truckId,
+    actor: entry.actor,
+    action: entry.action,
+    payload: entry.payload ? JSON.parse(entry.payload) : null,
+    createdAt: entry.createdAt.toISOString(),
   };
 }

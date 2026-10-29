@@ -118,6 +118,74 @@ export interface CurrentUser {
   username: string;
 }
 
+/**
+ * Internal trucks / conjuntos (master plan §11): a company-owned truck with
+ * a pre-registered tare. A camera read for a registered plate closes a
+ * ticket from a single event, using the active conjunto assignment's tare
+ * for the leg that didn't fire.
+ *
+ * A conjunto is a shared rig/trailer type (e.g. "Vanderleia", "Bitrem
+ * Bicaçamba") — the same conjunto can be assigned to many trucks, each with
+ * its own tare, confirmed against the company's real paper registry.
+ */
+export interface Conjunto {
+  id: number;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One (truck, conjunto) assignment, carrying that pair's tare. */
+export interface TruckConjunto {
+  id: number;
+  truckId: number;
+  conjuntoId: number;
+  conjuntoName: string;
+  tareWeightKg: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Truck {
+  id: number;
+  plate: string;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+  conjuntos: TruckConjunto[];
+}
+
+export interface TruckAuditLogEntry {
+  id: number;
+  truckId: number;
+  actor: string;
+  action: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface TruckDetail {
+  truck: Truck;
+  auditLog: TruckAuditLogEntry[];
+}
+
+export interface CreateTruckPayload {
+  plate: string;
+  label?: string;
+}
+
+export interface CreateConjuntoPayload {
+  name: string;
+}
+
+/** Either `conjuntoId` (assign an existing conjunto) or `conjuntoName` (create one inline) must be set. */
+export interface AssignConjuntoPayload {
+  conjuntoId?: number;
+  conjuntoName?: string;
+  tareWeightKg: number;
+}
+
 export interface LoginPayload {
   username: string;
   password: string;

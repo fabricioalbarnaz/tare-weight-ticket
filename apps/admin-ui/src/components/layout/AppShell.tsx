@@ -8,6 +8,7 @@ const NAV_LINKS = [
   { to: '/', labelKey: 'nav.dashboard' },
   { to: '/history', labelKey: 'nav.history' },
   { to: '/unresolved-events', labelKey: 'nav.unresolvedEvents' },
+  { to: '/internal-trucks', labelKey: 'nav.internalTrucks' },
   { to: '/status', labelKey: 'nav.hardwareStatus' },
 ] as const;
 
