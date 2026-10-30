@@ -1,5 +1,6 @@
 import { normalizePlate } from '../domain/plate.js';
 import type { ScaleReadFailureReason } from '../scale/types.js';
+import type { TruckRepository } from '../trucks/repository.js';
 import type { Ticket, TicketRepository } from './repository.js';
 
 export const TICKET_AUDIT_ACTIONS = {
@@ -9,6 +10,10 @@ export const TICKET_AUDIT_ACTIONS = {
   EXIT_CAPTURED: 'exit_captured',
   EXIT_CAPTURE_FAILED: 'exit_capture_failed',
   ANOMALY_FLAGGED: 'anomaly_flagged',
+  /** The entry leg was filled from a registered internal truck's active conjunto tare, not a real camera/scale event — see master plan §11. */
+  ENTRY_VIA_TARE: 'internal_truck_entry_via_tare',
+  /** The exit leg was filled from a registered internal truck's active conjunto tare — see master plan §11. */
+  EXIT_VIA_TARE: 'internal_truck_exit_via_tare',
 } as const;
 
 export interface EntranceReadingInput {
@@ -35,6 +40,8 @@ export interface EntranceReadingInput {
 export type EntranceResult =
   | { kind: 'ticket_opened'; ticket: Ticket }
   | { kind: 'ticket_retriggered'; ticket: Ticket }
+  /** Internal truck (master plan §11): the entrance leg was the real weighing, the exit leg came from the active conjunto's tare — ticket closes immediately. */
+  | { kind: 'ticket_closed_via_tare'; ticket: Ticket }
   | { kind: 'plate_unreadable' };
 
 export interface ExitReadingInput {
@@ -66,7 +73,7 @@ export interface SessionService {
   handleExitReading(input: ExitReadingInput): ExitResult;
 }
 
-export function createSessionService(repo: TicketRepository): SessionService {
+export function createSessionService(repo: TicketRepository, truckRepo: TruckRepository): SessionService {
   return {
     handleEntranceReading(input) {
       const plate = normalizePlate(input.rawPlate);
@@ -78,6 +85,56 @@ export function createSessionService(repo: TicketRepository): SessionService {
           timestamp: input.timestamp,
         });
         return { kind: 'plate_unreadable' };
+      }
+
+      const activeTare = truckRepo.findActiveTareByPlate(plate);
+      if (activeTare) {
+        return repo.transaction((): EntranceResult => {
+          const opened = repo.create({
+            plate,
+            entryAt: input.receivedAt,
+            entryWeightKg: input.weightKg,
+            entryCameraId: input.cameraId,
+            entryCaptureFailed: input.weightCaptureFailed,
+          });
+          const ticket = repo.close(opened.id, {
+            exitAt: input.receivedAt,
+            exitWeightKg: activeTare.tareWeightKg,
+            exitCameraId: null,
+            exitCaptureFailed: false,
+          });
+
+          repo.appendAuditLog(
+            ticket.id,
+            'system',
+            input.weightCaptureFailed
+              ? TICKET_AUDIT_ACTIONS.ENTRY_CAPTURE_FAILED
+              : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED,
+            { weightKg: input.weightKg, cameraId: input.cameraId },
+          );
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_VIA_TARE, {
+            truckConjuntoId: activeTare.truckConjuntoId,
+            tareWeightKg: activeTare.tareWeightKg,
+          });
+          repo.recordRawEvent(
+            'camera_entrance',
+            { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+            ticket.id,
+          );
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'entrance',
+              weightKg: input.weightKg,
+              weightCaptureFailed: input.weightCaptureFailed,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
+
+          return { kind: 'ticket_closed_via_tare', ticket };
+        });
       }
 
       return repo.transaction((): EntranceResult => {
@@ -139,6 +196,56 @@ export function createSessionService(repo: TicketRepository): SessionService {
           timestamp: input.timestamp,
         });
         return { kind: 'plate_unreadable' };
+      }
+
+      const activeTare = truckRepo.findActiveTareByPlate(plate);
+      if (activeTare) {
+        return repo.transaction((): ExitResult => {
+          const opened = repo.create({
+            plate,
+            entryAt: input.receivedAt,
+            entryWeightKg: activeTare.tareWeightKg,
+            entryCameraId: null,
+            entryCaptureFailed: false,
+          });
+          const ticket = repo.close(opened.id, {
+            exitAt: input.receivedAt,
+            exitWeightKg: input.weightKg,
+            exitCameraId: input.cameraId,
+            exitCaptureFailed: input.weightCaptureFailed,
+          });
+
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE, {
+            truckConjuntoId: activeTare.truckConjuntoId,
+            tareWeightKg: activeTare.tareWeightKg,
+          });
+          repo.appendAuditLog(
+            ticket.id,
+            'system',
+            input.weightCaptureFailed
+              ? TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED
+              : TICKET_AUDIT_ACTIONS.EXIT_CAPTURED,
+            { weightKg: input.weightKg, cameraId: input.cameraId },
+          );
+          repo.recordRawEvent(
+            'camera_exit',
+            { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+            ticket.id,
+          );
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'exit',
+              weightKg: input.weightKg,
+              weightCaptureFailed: input.weightCaptureFailed,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
+
+          return { kind: 'ticket_closed', ticket };
+        });
       }
 
       return repo.transaction((): ExitResult => {

@@ -1,5 +1,9 @@
 import type {
+  AssignConjuntoPayload,
+  Conjunto,
+  CreateConjuntoPayload,
   CreateTicketPayload,
+  CreateTruckPayload,
   CurrentUser,
   EditEntryPayload,
   EditExitPayload,
@@ -11,6 +15,8 @@ import type {
   Ticket,
   TicketDetail,
   TicketListQuery,
+  Truck,
+  TruckDetail,
 } from './types';
 
 export class ApiError extends Error {
@@ -100,5 +106,33 @@ export const api = {
 
   status(): Promise<HardwareStatus> {
     return request('/status');
+  },
+
+  listTrucks(): Promise<Truck[]> {
+    return request('/trucks');
+  },
+
+  getTruck(id: number): Promise<TruckDetail> {
+    return request(`/trucks/${id}`);
+  },
+
+  createTruck(payload: CreateTruckPayload): Promise<{ truck: Truck }> {
+    return request('/trucks', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  listConjuntos(): Promise<Conjunto[]> {
+    return request('/conjuntos');
+  },
+
+  createConjunto(payload: CreateConjuntoPayload): Promise<{ conjunto: Conjunto }> {
+    return request('/conjuntos', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  assignConjuntoToTruck(truckId: number, payload: AssignConjuntoPayload): Promise<{ truck: Truck }> {
+    return request(`/trucks/${truckId}/conjuntos`, { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  activateTruckConjunto(truckConjuntoId: number): Promise<{ truck: Truck }> {
+    return request(`/truck-conjuntos/${truckConjuntoId}/activate`, { method: 'POST' });
   },
 };

@@ -75,6 +75,58 @@ export const editExitBodySchema = {
   additionalProperties: false,
 } as const;
 
+export const truckIdParamsSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '^[0-9]+$' },
+  },
+  required: ['id'],
+} as const;
+
+export const truckConjuntoIdParamsSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '^[0-9]+$' },
+  },
+  required: ['id'],
+} as const;
+
+export const createTruckBodySchema = {
+  type: 'object',
+  properties: {
+    plate: { type: 'string', minLength: 1 },
+    label: { type: 'string' },
+  },
+  required: ['plate'],
+  additionalProperties: false,
+} as const;
+
+export const createConjuntoBodySchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1 },
+  },
+  required: ['name'],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Assigns a conjunto to a truck with the pair's tare. Either `conjuntoId`
+ * (an existing shared conjunto) or `conjuntoName` (creates a new shared
+ * conjunto inline) must be given — enforced in the route handler, not the
+ * schema, matching this repo's style elsewhere for cross-field rules.
+ */
+export const assignConjuntoBodySchema = {
+  type: 'object',
+  properties: {
+    conjuntoId: { type: 'integer' },
+    conjuntoName: { type: 'string', minLength: 1 },
+    tareWeightKg: { type: 'number' },
+  },
+  required: ['tareWeightKg'],
+  additionalProperties: false,
+} as const;
+
 export const reprintBodySchema = {
   type: 'object',
   properties: {
@@ -130,4 +182,27 @@ export interface EditExitBody {
 
 export interface ReprintBody {
   reason?: string;
+}
+
+export interface TruckIdParams {
+  id: string;
+}
+
+export interface TruckConjuntoIdParams {
+  id: string;
+}
+
+export interface CreateTruckBody {
+  plate: string;
+  label?: string;
+}
+
+export interface CreateConjuntoBody {
+  name: string;
+}
+
+export interface AssignConjuntoBody {
+  conjuntoId?: number;
+  conjuntoName?: string;
+  tareWeightKg: number;
 }

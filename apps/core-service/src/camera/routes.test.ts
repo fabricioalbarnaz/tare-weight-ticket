@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { createDb, type Db } from '../db/client.js';
 import { createTicketRepository, type TicketRepository } from '../tickets/repository.js';
+import { createTruckRepository, type TruckRepository } from '../trucks/repository.js';
 import type { ScaleClient, ScaleReadResult } from '../scale/types.js';
 import type { DriverSignalAdapter, DriverSignalDirection } from '../driver-signal/types.js';
 import type { PrintClient } from '../printing/print-client.js';
@@ -15,6 +16,7 @@ let dbPath: string;
 let sqlite: ReturnType<typeof createDb>['sqlite'];
 let db: Db;
 let repo: TicketRepository;
+let truckRepo: TruckRepository;
 let app: FastifyInstance;
 let nextScaleReading: ScaleReadResult;
 let driverSignalCalls: DriverSignalDirection[];
@@ -61,6 +63,7 @@ beforeEach(() => {
   db = created.db;
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
+  truckRepo = createTruckRepository(db);
   nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
   driverSignalCalls = [];
   printCalls = 0;
@@ -301,5 +304,68 @@ describe('POST /webhooks/camera/exit', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+  });
+});
+
+describe('internal trucks (pre-registered tare)', () => {
+  function registerTruckWithActiveTare(plate: string, tareWeightKg: number): void {
+    const truck = truckRepo.createTruck({ plate, label: 'Test truck' });
+    const conjunto = truckRepo.createConjunto({ name: `Conjunto ${plate}` });
+    const assignment = truckRepo.assignConjuntoToTruck({ truckId: truck.id, conjuntoId: conjunto.id, tareWeightKg });
+    truckRepo.activateTruckConjunto(assignment.id);
+  }
+
+  it('closes and prints a ticket on the entrance event alone, using the tare as the exit weight', async () => {
+    registerTruckWithActiveTare('INT0001', 9000);
+    nextScaleReading = { weightKg: 21000, weightCaptureFailed: false };
+
+    const response = await postEntrance({ plate: 'INT0001' });
+
+    expect(response.json().kind).toBe('ticket_closed_via_tare');
+    const ticket = repo.findById(response.json().ticketId);
+    expect(ticket?.status).toBe('CLOSED');
+    expect(ticket?.entryWeightKg).toBe(21000);
+    expect(ticket?.exitWeightKg).toBe(9000);
+    expect(ticket?.netWeightKg).toBe(12000);
+    expect(driverSignalCalls).toEqual(['in']);
+    expect(printCalls).toBe(1);
+    expect(ticket?.printedAt).not.toBeNull();
+    // No matching exit event ever arrives for this trip.
+    expect(repo.findOpenByPlate('INT0001')).toBeUndefined();
+  });
+
+  it('closes and prints a ticket on the exit event alone, using the tare as the entry weight', async () => {
+    registerTruckWithActiveTare('INT0002', 9000);
+    nextScaleReading = { weightKg: 23000, weightCaptureFailed: false };
+
+    const response = await postExit({ plate: 'INT0002' });
+
+    expect(response.json().kind).toBe('ticket_closed');
+    const ticket = repo.findById(response.json().ticketId);
+    expect(ticket?.status).toBe('CLOSED');
+    expect(ticket?.entryWeightKg).toBe(9000);
+    expect(ticket?.exitWeightKg).toBe(23000);
+    expect(ticket?.netWeightKg).toBe(14000);
+    expect(driverSignalCalls).toEqual(['out']);
+    expect(printCalls).toBe(1);
+  });
+
+  it('does not flag an anomaly for an internal truck exiting with no prior entrance event', async () => {
+    registerTruckWithActiveTare('INT0003', 9000);
+    nextScaleReading = { weightKg: 23000, weightCaptureFailed: false };
+
+    const response = await postExit({ plate: 'INT0003' });
+
+    expect(response.json().kind).not.toBe('anomaly_flagged');
+  });
+
+  it('falls through to the normal flow for an internal truck with no active conjunto', async () => {
+    truckRepo.createTruck({ plate: 'INT0004', label: 'No conjunto yet' });
+    nextScaleReading = { weightKg: 18000, weightCaptureFailed: false };
+
+    const response = await postEntrance({ plate: 'INT0004' });
+
+    expect(response.json().kind).toBe('ticket_opened');
+    expect(repo.findOpenByPlate('INT0004')?.status).toBe('OPEN');
   });
 });

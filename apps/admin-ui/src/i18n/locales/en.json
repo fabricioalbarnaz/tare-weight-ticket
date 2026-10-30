@@ -16,6 +16,7 @@
     "dashboard": "Dashboard",
     "history": "History",
     "unresolvedEvents": "Unresolved Events",
+    "internalTrucks": "Internal Trucks",
     "hardwareStatus": "Hardware Status",
     "logout": "Log out"
   },
@@ -96,6 +97,44 @@
       "scale": "Scale"
     }
   },
+  "internalTrucks": {
+    "title": "Internal trucks",
+    "description": "Company-owned trucks with a pre-registered tare. A camera read for one of these plates closes the ticket from a single event — the leg that didn't fire uses the active conjunto's tare. A conjunto (rig/trailer type) can be shared by many trucks, each with its own tare.",
+    "newTruck": "New truck",
+    "createHeading": "Register internal truck",
+    "loadError": "Could not load internal trucks.",
+    "empty": "No internal trucks registered yet.",
+    "table": {
+      "plate": "Plate",
+      "label": "Label",
+      "activeTare": "Active tare",
+      "tareWithLabel": "{{label}} — {{tareWeightKg}} kg",
+      "noActiveTare": "No active conjunto",
+      "manage": "Manage"
+    }
+  },
+  "truckDetail": {
+    "loading": "Loading truck…",
+    "notFound": "Truck not found.",
+    "backToList": "← Back to internal trucks",
+    "heading": "Truck {{plate}}",
+    "conjuntosHeading": "Registered conjuntos",
+    "conjuntosDescription": "Rig/trailer types already assigned to this truck, each with its own tare. Only one can be active at a time.",
+    "noConjuntos": "No conjuntos assigned yet for this truck.",
+    "tareWeight": "{{tareWeightKg}} kg",
+    "active": "Active",
+    "activate": "Activate",
+    "assignConjuntoHeading": "Assign a conjunto",
+    "assignConjuntoDescription": "Pick an existing conjunto (shared across trucks) or create a new one, and set this truck's tare for it.",
+    "auditTrail": "Audit trail"
+  },
+  "truckAuditLog": {
+    "actions": {
+      "truck_created": "Truck registered",
+      "conjunto_assigned": "Conjunto assigned",
+      "conjunto_activated": "Conjunto activated"
+    }
+  },
   "auditLog": {
     "empty": "No audit log entries yet.",
     "by": "by {{actor}}",
@@ -156,6 +195,31 @@
       "printing": "Printing…",
       "cancel": "Cancel",
       "error": "Reprint failed."
+    },
+    "createTruck": {
+      "plate": "Plate",
+      "label": "Label (optional)",
+      "submit": "Register truck",
+      "submitting": "Registering…",
+      "error": "Could not register the truck. Please try again.",
+      "validation": {
+        "plate": "Enter the plate"
+      }
+    },
+    "assignConjunto": {
+      "conjunto": "Conjunto",
+      "selectPlaceholder": "Select a conjunto…",
+      "newConjuntoOption": "+ New conjunto…",
+      "newConjuntoName": "New conjunto name",
+      "tareWeight": "Tare weight for this truck (kg)",
+      "submit": "Assign conjunto",
+      "submitting": "Assigning…",
+      "error": "Could not assign the conjunto. Please try again.",
+      "validation": {
+        "conjunto": "Select a conjunto or create a new one",
+        "newConjuntoName": "Enter a name for the new conjunto",
+        "weightPositive": "Weight must be greater than 0"
+      }
     }
   },
   "tickets": {
