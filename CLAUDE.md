@@ -89,6 +89,40 @@ needed zero code changes to work against the real backend — just
 `VITE_API_MODE=proxy` instead of `mock`. No real hardware to test the
 Admin UI's own integration page against yet (that's Phase 7, on-site).
 
+**Incident & fix (2026-10-31): SQLite writes silently stopped reaching
+disk after a routine container restart.** On this install, a `docker
+compose up -d core-service` done the night before (2026-10-29, to pick up
+PR #6's migration) left the running container's SQLite connection unable
+to durably persist any further write — `core-service` kept responding
+`200 OK` to every camera/scale webhook and the Admin UI kept showing
+correct data (served from that same live connection's own view), but
+`data/tare.sqlite` on disk hadn't gained a single new row in ~35 hours
+(52 tickets' worth of real truck traffic, discovered while investigating
+why one specific ticket was missing its entrance weighing). Root cause:
+`src/db/client.ts` had `journal_mode = WAL`, which requires shared-memory
+(mmap) coordination between SQLite connections — **this specific
+install's** `docker/docker-compose.yml` bind-mounts a Windows host folder
+(`../data`) into the Linux container, and that bind-mount boundary (Docker
+Desktop on Windows, WSL2 backend) doesn't reliably support WAL's
+shared-memory requirement. A fresh connection opened from a second
+process could reproduce the failure on demand (`SQLITE_IOERR_SHORT_READ`)
+while the original long-lived connection kept working from its own
+in-process view. Fix: switched to `journal_mode = DELETE` (plain
+file-lock-based journal, no shared-memory requirement) — one-line change,
+test updated in `db/client.test.ts`. The 52 in-flight tickets were
+recovered by exporting them live via the Admin API (the only remaining
+copy) before restarting, then inserted directly into the SQLite file
+while the container was stopped (bypassing business-logic side effects
+like re-printing already-printed tickets), each tagged with a
+`reconstructed_after_wal_incident` audit log entry. **This is a property
+of how *this* install's `docker-compose.yml` mounts the data volume, not
+an inherent SQLite/WAL limitation** — per the master plan's architecture,
+every per-PC install uses this same Windows-bind-mount structure today, so
+the fix is in the shared code and applies to all of them, but an install
+that someday used a Docker named volume or a non-Windows host for this
+file would not have hit this and could reasonably re-enable WAL for its
+better write concurrency. See master plan §11 for more detail.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

@@ -13,7 +13,7 @@ afterEach(() => {
   openSqlite?.close();
   openSqlite = undefined;
   if (dbPath) {
-    for (const suffix of ['', '-wal', '-shm']) {
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
       fs.rmSync(dbPath + suffix, { force: true });
     }
     dbPath = undefined;
@@ -40,7 +40,7 @@ describe('createDb', () => {
     );
   });
 
-  it('enables WAL mode and foreign key enforcement', () => {
+  it('enables DELETE journal mode (not WAL, see client.ts comment) and foreign key enforcement', () => {
     const db = openTempDb();
 
     const [{ journal_mode: journalMode }] = db.all<{ journal_mode: string }>(
@@ -50,7 +50,7 @@ describe('createDb', () => {
       sql`PRAGMA foreign_keys`,
     );
 
-    expect(journalMode).toBe('wal');
+    expect(journalMode).toBe('delete');
     expect(foreignKeys).toBe(1);
   });
 

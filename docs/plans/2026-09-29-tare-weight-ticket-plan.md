@@ -429,6 +429,36 @@ remain deferred to Phase 7 — no equivalent findings exist for those yet.
    boot and containers set to `restart: always`; the print bridge (if kept
    native) needs to run as a Windows service. This needs to be part of the
    per-PC install runbook (Phase 8), not just a docker-compose file.
+7. **Bug, found 2026-10-31, not yet fixed: a ticket's entry weight can
+   become permanently uncorrectable through the Admin UI.** If a truck's
+   entrance weighing fails (e.g. the known camera-trigger-line timing
+   issue — see
+   [`docs/runbooks/known-ticket-failure-patterns.md`](../runbooks/known-ticket-failure-patterns.md)),
+   the ticket stays `OPEN` with a null entry weight, per the 2026-10-27
+   "never release without a captured weight" rule (item 2 above /
+   `docs/plans/2026-10-27-scale-capture-reliability-plan.md`). But that
+   rule only guards the *same* leg's own capture — if the truck's exit
+   read later succeeds normally (the usual case, since the trigger-line
+   issue is specific to that one entrance), `handleExitReading` closes the
+   ticket via `repo.close()` with no check that the entry leg ever got a
+   weight, and `printService.printIfNeeded()` auto-prints it with a blank
+   entry weight and blank net weight (its own check is only
+   `status === 'CLOSED' && printedAt === null`). At that point
+   `PATCH /tickets/:id/entry` in `core-service/src/admin/routes.ts`
+   refuses the correction with `409 "Ticket is not OPEN"` — unlike
+   `PATCH /tickets/:id/exit`, which has a `correctExit` path for non-`OPEN`
+   tickets, the entry side has no post-close correction path at all. The
+   Admin UI's `EditLegForm` also shows one generic error string for any
+   failure, so the operator sees "Não foi possível salvar. Tente
+   novamente." with no indication it's a 409/status conflict. Full
+   analysis and a concrete example (ticket #254/id 259, plate IXI9886) are
+   in the runbook linked above. **Status: open, not yet scheduled** — the
+   likely fix is a `correctEntry` path mirroring `correctExit` (recomputing
+   `netWeightKg`) plus surfacing the real server error in the UI, but per
+   this file's own workflow (§ "Development workflow" in `CLAUDE.md`) that
+   needs its own step-by-step plan in `docs/plans/` before work starts, not
+   a scope creep onto whatever other change is in flight when this gets
+   picked up.
 
 ## 8. Testing strategy
 
@@ -880,3 +910,70 @@ merge per `CLAUDE.md`):
   successful run on one PC, not production sign-off. The serial runbook's
   on-site validation checklist (cold boot, reboot, vendor DGN spec) is
   still open.
+
+### SQLite WAL mode vs. Windows bind mount — silent write loss incident (2026-10-31)
+
+- **Found while investigating why a specific ticket (plate `MPB4J25`) was
+  missing its entrance weighing**: that turned out to be a normal,
+  correctly-handled `ANOMALY` (exit without a matching entrance — no bug).
+  But confirming it against `data/tare.sqlite` directly surfaced something
+  much bigger: **the database file hadn't gained a single new row in ~35
+  hours**, despite `core-service` continuing to log successful scale reads
+  and respond `200 OK` to every camera webhook in that window, and the
+  Admin UI continuing to show correct, up-to-date ticket data throughout.
+  52 tickets' worth of real truck traffic existed only in the running
+  container's in-memory connection state, never reaching disk.
+- **Root cause**: `src/db/client.ts` set `journal_mode = WAL`. WAL requires
+  shared-memory (mmap) coordination between SQLite connections to let
+  readers see recent writes before they're checkpointed. This install's
+  `docker/docker-compose.yml` bind-mounts a Windows host folder (`../data`)
+  into the Linux container (Docker Desktop, WSL2 backend) — that mount
+  boundary doesn't reliably support WAL's shared-memory requirement. A
+  fresh connection opened from a second process reproduced the failure on
+  demand (`SQLITE_IOERR_SHORT_READ`, "disk I/O error") immediately on
+  open, while the app's own long-lived connection kept responding
+  normally from its own in-process view — no exception ever reached
+  Fastify, so nothing in the logs flagged it as an error.
+- **Trigger**: not something introduced by this session's own work —
+  traced to a routine `docker compose build core-service` +
+  `docker compose up -d core-service` the night before (2026-10-29
+  ~21:33 local), done correctly to pick up PR #6's code and its
+  `0001_grey_blizzard` migration (`internal_trucks`/`conjuntos`). That
+  container recreation is what first opened the bind-mounted file in a
+  state where subsequent writes stopped landing on disk. Any restart of
+  this container carries the same risk until the fix below ships.
+  Likely the same underlying issue as the already-documented "seeding the
+  admin user... needs a container restart to take effect" note in the
+  first-on-site-install section above (2026-10-24) — that was an earlier,
+  milder symptom of the same WAL/bind-mount mismatch, previously
+  mis-attributed to "the connection just needs a restart to pick up
+  externally-inserted rows" rather than a durability problem.
+- **Recovery**: exported the 52 in-flight tickets live via the Admin API
+  (`GET /api/admin/tickets`) before touching anything — that live
+  connection was the only remaining copy. Stopped the container, inserted
+  the 52 rows directly into `tickets` (plus a `reconstructed_after_wal_incident`
+  audit log entry each) while it was down — bypassing `POST /tickets`'s
+  business logic deliberately, since replaying real ticket creation would
+  have re-sent ESC/POS bytes to the real network printer for the 16
+  already-printed `CLOSED` tickets among them, and there is no admin
+  endpoint capable of creating a ticket directly in `ANOMALY` status (the
+  other 22) in the first place. Restarted the container and verified via
+  the Admin API and a fresh disk read that all 250 tickets (198 pre-existing
+  + 52 recovered) matched.
+- **Fix**: switched `journal_mode` to `DELETE` in `src/db/client.ts` — a
+  plain file-lock-based rollback journal with no shared-memory
+  requirement, so it isn't subject to this bind-mount incompatibility.
+  One-line change; `db/client.test.ts` updated to assert `'delete'`
+  instead of `'wal'`. Verified via the documented Alpine-container
+  workflow (clean install, `lint`/`typecheck`/`test`/`build` all green,
+  243/243 tests) and natively on Windows.
+- **Caveat — this is specific to this install's filesystem topology, not
+  an inherent SQLite/WAL limitation.** Every per-PC install today uses the
+  same Windows-host + Docker-Desktop + WSL2 + bind-mount structure (§3/§6),
+  so the fix is in the shared codebase and protects all of them uniformly.
+  But if some future install ran `core-service` against this file through
+  a Docker *named volume* instead of a Windows bind mount, or on a native
+  Linux host, it would not hit this specific failure mode and could
+  reasonably re-enable WAL for its better write concurrency under
+  contention — worth re-checking this decision if the deployment topology
+  ever changes.
