@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '../db/client.js';
 import { adminUsers } from '../db/schema.js';
-import { createTicketRepository, type TicketRepository } from './repository.js';
+import { createTicketRepository, type Ticket, type TicketRepository } from './repository.js';
+import { createTicketEvents } from './ticket-events.js';
 
 let dbPath: string;
 let sqlite: ReturnType<typeof createDb>['sqlite'];
@@ -538,6 +539,60 @@ describe('TicketRepository', () => {
 
     it('returns undefined for an unknown username', () => {
       expect(repo.findAdminUserByUsername('nobody')).toBeUndefined();
+    });
+  });
+
+  describe('ticket change events', () => {
+    it('emits a change event for every mutating method', () => {
+      const changes: Ticket[] = [];
+      const events = createTicketEvents();
+      events.onChanged((ticket) => changes.push(ticket));
+      const trackedRepo = createTicketRepository(db, events);
+
+      const created = trackedRepo.create({
+        plate: 'EVT0001',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      expect(changes).toHaveLength(1);
+
+      trackedRepo.updateEntry(created.id, {
+        entryAt: new Date('2026-01-01T08:05:00Z'),
+        entryWeightKg: 21000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      expect(changes).toHaveLength(2);
+
+      const closed = trackedRepo.close(created.id, {
+        exitAt: new Date('2026-01-01T09:00:00Z'),
+        exitWeightKg: 8000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+      expect(changes).toHaveLength(3);
+
+      trackedRepo.correctExit(closed.id, {
+        exitAt: new Date('2026-01-01T09:05:00Z'),
+        exitWeightKg: 8500,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+      expect(changes).toHaveLength(4);
+
+      trackedRepo.markPrinted(closed.id, new Date());
+      expect(changes).toHaveLength(5);
+
+      trackedRepo.flagAnomaly({
+        plate: 'EVT0002',
+        exitAt: new Date('2026-01-01T10:00:00Z'),
+        exitWeightKg: 5000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+      expect(changes).toHaveLength(6);
     });
   });
 });

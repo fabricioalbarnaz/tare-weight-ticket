@@ -9,6 +9,7 @@ import {
 } from '../db/schema.js';
 import type { Db } from '../db/client.js';
 import { calculateNetWeightKg } from '../domain/net-weight.js';
+import { createTicketEvents, type TicketEvents } from './ticket-events.js';
 
 export type Ticket = typeof tickets.$inferSelect;
 export type TicketAuditLogEntry = typeof ticketAuditLog.$inferSelect;
@@ -97,7 +98,7 @@ export interface TicketRepository {
   transaction<T>(fn: () => T): T;
 }
 
-export function createTicketRepository(db: Db): TicketRepository {
+export function createTicketRepository(db: Db, events: TicketEvents = createTicketEvents()): TicketRepository {
   function nextTicketNumber(): number {
     const row = db.get<{ maxNumber: number | null }>(
       sql`SELECT MAX(${tickets.ticketNumber}) as maxNumber FROM ${tickets}`,
@@ -213,7 +214,7 @@ export function createTicketRepository(db: Db): TicketRepository {
 
     create(input) {
       const now = new Date();
-      return db
+      const created = db
         .insert(tickets)
         .values({
           ticketNumber: nextTicketNumber(),
@@ -229,6 +230,8 @@ export function createTicketRepository(db: Db): TicketRepository {
         })
         .returning()
         .get();
+      events.emitChanged(created);
+      return created;
     },
 
     updateEntry(ticketId, input) {
@@ -248,6 +251,7 @@ export function createTicketRepository(db: Db): TicketRepository {
       if (!updated) {
         throw new Error(`Cannot update entry for ticket ${ticketId}: not found or not OPEN`);
       }
+      events.emitChanged(updated);
       return updated;
     },
 
@@ -276,6 +280,7 @@ export function createTicketRepository(db: Db): TicketRepository {
       if (!closed) {
         throw new Error(`Cannot close ticket ${ticketId}: not found or not OPEN`);
       }
+      events.emitChanged(closed);
       return closed;
     },
 
@@ -290,7 +295,7 @@ export function createTicketRepository(db: Db): TicketRepository {
           ? calculateNetWeightKg(current.entryWeightKg, input.exitWeightKg)
           : null;
 
-      return db
+      const corrected = db
         .update(tickets)
         .set({
           exitAt: input.exitAt,
@@ -303,6 +308,8 @@ export function createTicketRepository(db: Db): TicketRepository {
         .where(eq(tickets.id, ticketId))
         .returning()
         .get()!;
+      events.emitChanged(corrected);
+      return corrected;
     },
 
     markPrinted(ticketId, printedAt) {
@@ -316,12 +323,13 @@ export function createTicketRepository(db: Db): TicketRepository {
       if (!updated) {
         throw new Error(`Cannot mark ticket ${ticketId} as printed: not found or not CLOSED`);
       }
+      events.emitChanged(updated);
       return updated;
     },
 
     flagAnomaly(input) {
       const now = new Date();
-      return db
+      const flagged = db
         .insert(tickets)
         .values({
           ticketNumber: nextTicketNumber(),
@@ -336,6 +344,8 @@ export function createTicketRepository(db: Db): TicketRepository {
         })
         .returning()
         .get();
+      events.emitChanged(flagged);
+      return flagged;
     },
 
     appendAuditLog(ticketId, actor, action, payload) {

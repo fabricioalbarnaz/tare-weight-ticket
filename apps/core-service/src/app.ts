@@ -5,6 +5,7 @@ import type { Db } from './db/client.js';
 import { createTicketRepository } from './tickets/repository.js';
 import { createSessionService } from './tickets/session-service.js';
 import { createTruckRepository } from './trucks/repository.js';
+import { createTicketEvents } from './tickets/ticket-events.js';
 import type { ScaleClient } from './scale/types.js';
 import type { DriverSignalAdapter } from './driver-signal/types.js';
 import type { PrintClient } from './printing/print-client.js';
@@ -41,8 +42,9 @@ export interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app = options.logger ? Fastify({ loggerInstance: options.logger }) : Fastify({ logger: true });
 
-  const repo = createTicketRepository(options.db);
   const truckRepo = createTruckRepository(options.db);
+  const ticketEvents = createTicketEvents();
+  const repo = createTicketRepository(options.db, ticketEvents);
   const sessionService = createSessionService(repo, truckRepo);
   const printService = createPrintService(repo, options.printClient);
 
@@ -72,6 +74,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     driverSignalAdapter: options.driverSignalAdapter,
     printClient: options.printClient,
     sessionSecret: options.adminSessionSecret,
+    ticketEvents,
   });
 
   if (options.adminUiDir) {

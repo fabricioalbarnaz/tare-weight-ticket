@@ -4,7 +4,14 @@ import type { Ticket } from '../../api/types';
 import { formatDateTime, formatWeight } from '../../lib/datetime';
 import { StatusBadge } from './StatusBadge';
 
-export function TicketTable({ tickets }: { tickets: Ticket[] }) {
+export function TicketTable({
+  tickets,
+  readOnly = false,
+}: {
+  tickets: Ticket[];
+  /** When true, renders the ticket number as plain text instead of a link to the (admin-only) detail/edit page. */
+  readOnly?: boolean;
+}) {
   const { t, i18n } = useTranslation();
 
   if (tickets.length === 0) {
@@ -27,9 +34,13 @@ export function TicketTable({ tickets }: { tickets: Ticket[] }) {
         {tickets.map((ticket) => (
           <tr key={ticket.id} className="hover:bg-slate-50">
             <td className="py-2 pr-4">
-              <Link to={`/tickets/${ticket.id}`} className="font-medium text-slate-900 hover:underline">
-                #{ticket.ticketNumber}
-              </Link>
+              {readOnly ? (
+                <span className="font-medium text-slate-900">#{ticket.ticketNumber}</span>
+              ) : (
+                <Link to={`/tickets/${ticket.id}`} className="font-medium text-slate-900 hover:underline">
+                  #{ticket.ticketNumber}
+                </Link>
+              )}
             </td>
             <td className="py-2 pr-4 font-mono">{ticket.plate}</td>
             <td className="py-2 pr-4">

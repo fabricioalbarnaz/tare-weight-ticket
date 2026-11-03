@@ -14,6 +14,7 @@
   "nav": {
     "appName": "EixoLink",
     "dashboard": "Dashboard",
+    "operation": "Operation",
     "history": "History",
     "unresolvedEvents": "Unresolved Events",
     "internalTrucks": "Internal Trucks",
@@ -37,6 +38,11 @@
   "dashboard": {
     "title": "Today's tickets",
     "newTicket": "New ticket",
+    "loadingTickets": "Loading tickets…",
+    "loadError": "Could not load tickets."
+  },
+  "operation": {
+    "title": "Truck records",
     "loadingTickets": "Loading tickets…",
     "loadError": "Could not load tickets."
   },

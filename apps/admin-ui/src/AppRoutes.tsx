@@ -7,6 +7,7 @@ import { HardwareStatusPage } from './pages/HardwareStatusPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { InternalTrucksPage } from './pages/InternalTrucksPage';
 import { LoginPage } from './pages/LoginPage';
+import { OperationPage } from './pages/OperationPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { TruckDetailPage } from './pages/TruckDetailPage';
 import { UnresolvedEventsPage } from './pages/UnresolvedEventsPage';
@@ -18,6 +19,7 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/operation" element={<OperationPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/unresolved-events" element={<UnresolvedEventsPage />} />
           <Route path="/status" element={<HardwareStatusPage />} />

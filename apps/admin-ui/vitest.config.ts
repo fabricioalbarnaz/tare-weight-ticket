@@ -8,6 +8,9 @@ export default defineConfig({
     globals: false,
     setupFiles: ['src/setup-tests.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
-    testTimeout: 10_000,
+    // Bumped from 10s (2026-10-29): with 9+ test files, spinning up that many
+    // jsdom environments concurrently can itself eat several seconds under
+    // load, which was flakily tripping the old timeout — not a test bug.
+    testTimeout: 20_000,
   },
 });

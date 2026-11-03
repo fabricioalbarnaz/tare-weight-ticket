@@ -6,6 +6,7 @@ import type { PrintClient } from '../printing/print-client.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { ScaleClient } from '../scale/types.js';
 import type { TicketRepository } from '../tickets/repository.js';
+import type { TicketEvents } from '../tickets/ticket-events.js';
 import type { TruckRepository } from '../trucks/repository.js';
 import { createAdminAuthService } from './auth-service.js';
 import { getHardwareStatus } from './hardware-status.js';
@@ -56,7 +57,11 @@ export interface AdminRoutesOptions {
   printClient: PrintClient;
   /** Must be at least 32 characters (enforced by `admin/config.ts`'s `loadAdminConfig`). */
   sessionSecret: string;
+  ticketEvents: TicketEvents;
 }
+
+/** How often the SSE ticket stream writes a comment-only keepalive line, so idle LAN connections/proxies don't time it out. */
+const STREAM_HEARTBEAT_MS = 25_000;
 
 const AUDIT_ACTIONS = {
   TICKET_CREATED: 'ticket_created_by_admin',
@@ -308,6 +313,38 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           reply.code(202).send({ ticket: serializeTicket(options.repo.findById(ticketId)!) });
         },
       );
+
+      // --- Ticket stream (SSE) ---
+
+      // Pushes a `ticket-changed` event (no payload — just a "something
+      // changed, refetch" signal) whenever any ticket is created or
+      // updated, so the Admin UI's listings can stay live without polling.
+      // Uses `reply.hijack()` because this handler owns the raw response
+      // for the life of the connection instead of calling `reply.send()`.
+      instance.get('/tickets/stream', { preHandler: requireAuth }, (request, reply) => {
+        reply.hijack();
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        });
+        reply.raw.write(':ok\n\n');
+
+        const sendChanged = () => {
+          reply.raw.write('event: ticket-changed\ndata: {}\n\n');
+        };
+        options.ticketEvents.onChanged(sendChanged);
+
+        const heartbeat = setInterval(() => {
+          reply.raw.write(':ping\n\n');
+        }, STREAM_HEARTBEAT_MS);
+
+        request.raw.on('close', () => {
+          clearInterval(heartbeat);
+          options.ticketEvents.offChanged(sendChanged);
+          reply.raw.end();
+        });
+      });
 
       // --- Unresolved events ---
 
