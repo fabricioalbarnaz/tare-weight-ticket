@@ -130,6 +130,7 @@
     "tareWeight": "{{tareWeightKg}} kg",
     "active": "Active",
     "activate": "Activate",
+    "activateError": "Couldn't activate this conjunto. Please try again.",
     "assignConjuntoHeading": "Assign a conjunto",
     "assignConjuntoDescription": "Pick an existing conjunto (shared across trucks) or create a new one, and set this truck's tare for it.",
     "auditTrail": "Audit trail"

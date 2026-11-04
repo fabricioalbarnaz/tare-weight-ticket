@@ -130,6 +130,7 @@
     "tareWeight": "{{tareWeightKg}} kg",
     "active": "Ativo",
     "activate": "Ativar",
+    "activateError": "Não foi possível ativar este conjunto. Tente novamente.",
     "assignConjuntoHeading": "Atribuir um conjunto",
     "assignConjuntoDescription": "Escolha um conjunto existente (compartilhado entre caminhões) ou crie um novo, e defina a tara deste caminhão para ele.",
     "auditTrail": "Trilha de auditoria"

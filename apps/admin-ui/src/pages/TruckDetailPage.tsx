@@ -54,6 +54,9 @@ export function TruckDetailPage() {
           {truck.conjuntos.length === 0 && (
             <p className="text-sm text-slate-500">{t('truckDetail.noConjuntos')}</p>
           )}
+          {activateMutation.isError && (
+            <p className="mb-2 text-xs text-red-600">{t('truckDetail.activateError')}</p>
+          )}
           {truck.conjuntos.length > 0 && (
             <ul className="space-y-2" data-testid="truck-conjunto-list">
               {truck.conjuntos.map((assignment) => (

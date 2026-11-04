@@ -1,5 +1,7 @@
+import { http, HttpResponse } from 'msw';
 import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { server } from '../api/mocks/server';
 import { renderApp } from '../test-utils';
 import { loginAsAdmin } from '../test-helpers';
 
@@ -28,6 +30,25 @@ describe('TruckDetailPage', () => {
       const bicacamba = items.find((item) => item.textContent?.includes('Bitrem Bicaçamba'));
       expect(bicacamba).toHaveTextContent(/active/i);
     });
+  });
+
+  it('shows an error message when activating a conjunto fails', async () => {
+    server.use(
+      http.post('/api/admin/truck-conjuntos/:id/activate', () =>
+        HttpResponse.text('Internal Server Error', { status: 500 }),
+      ),
+    );
+
+    renderApp({ route: '/login' });
+    const user = await loginAsAdmin();
+
+    await openTruckDetail(user, 'IZS7I76');
+    await screen.findByRole('heading', { name: /truck izs7i76/i });
+    const list = screen.getByTestId('truck-conjunto-list');
+
+    await user.click(within(list).getByRole('button', { name: /activate/i }));
+
+    await screen.findByText(/couldn't activate this conjunto/i);
   });
 
   it('shows the same shared conjunto with a different tare on another truck', async () => {
