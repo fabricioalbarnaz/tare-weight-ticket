@@ -243,7 +243,9 @@
       "entry": "Entrada",
       "exit": "Saída",
       "netWeight": "Peso líquido",
-      "empty": "Nenhum ticket encontrado."
+      "empty": "Nenhum ticket encontrado.",
+      "suspectWeightShort": "Checar peso",
+      "suspectWeight": "Uma leitura da balança deste ticket só foi confirmada após uma nova tentativa — confira se não houve cruzamento com outro caminhão na balança no mesmo intervalo."
     },
     "filters": {
       "searchPlaceholder": "Buscar por placa…"

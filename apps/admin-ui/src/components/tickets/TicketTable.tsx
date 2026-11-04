@@ -42,7 +42,17 @@ export function TicketTable({
                 </Link>
               )}
             </td>
-            <td className="py-2 pr-4 font-mono">{ticket.plate}</td>
+            <td className="py-2 pr-4 font-mono">
+              {ticket.plate}
+              {ticket.suspectWeight && (
+                <span
+                  className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                  title={t('tickets.table.suspectWeight')}
+                >
+                  ⚠ {t('tickets.table.suspectWeightShort')}
+                </span>
+              )}
+            </td>
             <td className="py-2 pr-4">
               <StatusBadge ticket={ticket} />
             </td>

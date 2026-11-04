@@ -64,7 +64,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    const { weightKg, weightCaptureFailed, failureReason, waitedMs } = await options.scaleClient.readStableWeight({
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'entrance',
       plate: event.rawPlate,
@@ -74,7 +74,13 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     // scale, releasing it without one is worse than holding it — the
     // operator's manual release button is the only way forward from here
     // until the record is corrected (see docs/plans/2026-10-27-...).
-    if (weightCaptureFailed) {
+    // An unreadable plate withholds the signal for the same reason (added
+    // 2026-11-03): with no plate, a captured weight can never be attributed
+    // to a truck afterward, which blocks payment downstream — see
+    // docs/plans/2026-11-03-withhold-signal-on-unreadable-plate-plan.md.
+    if (event.rawPlate === '') {
+      request.log.warn({}, 'camera: entrance plate unreadable, withholding driver signal — truck held pending manual intervention');
+    } else if (weightCaptureFailed) {
       request.log.warn(
         { plate: event.rawPlate, failureReason },
         'camera: entrance weight capture failed, withholding driver signal — truck held pending manual correction',
@@ -92,6 +98,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       weightCaptureFailed,
       failureReason,
       waitedMs,
+      attemptsUsed,
     });
 
     // Internal trucks (master plan §11) can close a ticket right on the
@@ -122,13 +129,15 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    const { weightKg, weightCaptureFailed, failureReason, waitedMs } = await options.scaleClient.readStableWeight({
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'exit',
       plate: event.rawPlate,
     });
     // See the matching comment in the entrance handler.
-    if (weightCaptureFailed) {
+    if (event.rawPlate === '') {
+      request.log.warn({}, 'camera: exit plate unreadable, withholding driver signal — truck held pending manual intervention');
+    } else if (weightCaptureFailed) {
       request.log.warn(
         { plate: event.rawPlate, failureReason },
         'camera: exit weight capture failed, withholding driver signal — truck held pending manual correction',
@@ -146,6 +155,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       weightCaptureFailed,
       failureReason,
       waitedMs,
+      attemptsUsed,
     });
 
     if (result.kind === 'ticket_closed') {

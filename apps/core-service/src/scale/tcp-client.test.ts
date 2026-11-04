@@ -46,7 +46,7 @@ describe('createTcpScaleClient', () => {
     await server.waitForConnection();
     server.send('ST,20000');
 
-    await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
+    await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false, attemptsUsed: 1 });
   });
 
   it('resolves with the stable weight after several unstable frames', async () => {
@@ -181,11 +181,30 @@ describe('createTcpScaleClient', () => {
       await server.waitForConnection(2);
       server.send('ST,20000');
 
-      await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
+      await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false, attemptsUsed: 2 });
       expect(server.connectionCount).toBe(2);
     });
 
-    it('gives up only after exhausting every attempt, and reports the cumulative waited time', async () => {
+    it('succeeds only on the 3rd attempt and reports attemptsUsed accordingly', async () => {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 300,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+      });
+
+      const readPromise = client.readStableWeight();
+      // First two attempts time out with no frame at all.
+      await server.waitForConnection(3);
+      server.send('ST,20000');
+
+      await expect(readPromise).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false, attemptsUsed: 3 });
+      expect(server.connectionCount).toBe(3);
+    });
+
+    it('gives up only after exhausting every attempt, and reports the cumulative waited time and attemptsUsed', async () => {
       server = await startMockScaleServer();
       client = createTcpScaleClient({
         host: '127.0.0.1',
@@ -197,7 +216,12 @@ describe('createTcpScaleClient', () => {
 
       const result = await client.readStableWeight();
 
-      expect(result).toMatchObject({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout' });
+      expect(result).toMatchObject({
+        weightKg: null,
+        weightCaptureFailed: true,
+        failureReason: 'stability_timeout',
+        attemptsUsed: 3,
+      });
       expect(result.waitedMs).toBeGreaterThanOrEqual(600);
       expect(server.connectionCount).toBe(3);
     });

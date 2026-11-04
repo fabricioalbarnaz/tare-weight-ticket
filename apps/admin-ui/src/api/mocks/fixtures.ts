@@ -138,7 +138,24 @@ function buildInitialStore(): FixtureStore {
     printedAt: hoursAgo(29),
   });
 
-  const tickets = [open, closed, anomaly, needsAttention, historical];
+  // Mirrors the real backend's listTickets suspectWeight flag (see
+  // docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md) — a scale
+  // read that only resolved on a retry, worth a human glance.
+  const suspect = makeTicket({
+    plate: 'SUS5566',
+    status: 'CLOSED',
+    entryAt: hoursAgo(5),
+    entryWeightKg: 20940,
+    entryCameraId: 'cam-entrance-1',
+    exitAt: hoursAgo(4),
+    exitWeightKg: 8000,
+    exitCameraId: 'cam-exit-1',
+    netWeightKg: 12940,
+    printedAt: hoursAgo(4),
+    suspectWeight: true,
+  });
+
+  const tickets = [open, closed, anomaly, needsAttention, historical, suspect];
 
   const auditLog: AuditLogEntry[] = [
     makeAuditEntry(open.id, 'system', 'entry_captured', {
@@ -172,6 +189,17 @@ function buildInitialStore(): FixtureStore {
     makeAuditEntry(historical.id, 'system', 'exit_captured', {
       weightKg: historical.exitWeightKg,
       cameraId: historical.exitCameraId,
+    }),
+    makeAuditEntry(suspect.id, 'system', 'entry_captured', {
+      weightKg: suspect.entryWeightKg,
+      cameraId: suspect.entryCameraId,
+      isRetrigger: false,
+      attemptsUsed: 3,
+    }),
+    makeAuditEntry(suspect.id, 'system', 'exit_captured', {
+      weightKg: suspect.exitWeightKg,
+      cameraId: suspect.exitCameraId,
+      attemptsUsed: 1,
     }),
   ];
 

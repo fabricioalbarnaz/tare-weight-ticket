@@ -192,15 +192,17 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   async function readWithRetries(context?: ScaleReadContext): Promise<ScaleReadResult> {
     let result: ScaleReadResult = { weightKg: null, weightCaptureFailed: true };
     let totalWaitedMs = 0;
+    let attemptsUsed = 0;
 
     for (let attempt = 1; attempt <= stabilityRetryCount; attempt += 1) {
       result = await readOne(context, attempt);
       totalWaitedMs += result.waitedMs ?? 0;
+      attemptsUsed = attempt;
 
       if (!result.weightCaptureFailed) break;
     }
 
-    return { ...result, waitedMs: totalWaitedMs };
+    return { ...result, waitedMs: totalWaitedMs, attemptsUsed };
   }
 
   return {

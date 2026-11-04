@@ -43,6 +43,18 @@ function auditActionsFor(ticketId: number): string[] {
     .map((row) => row.action);
 }
 
+function auditLogPayloadsFor(ticketId: number): Array<{ action: string; payload: Record<string, unknown> | null }> {
+  return db
+    .select()
+    .from(ticketAuditLog)
+    .where(eq(ticketAuditLog.ticketId, ticketId))
+    .all()
+    .map((row) => ({
+      action: row.action,
+      payload: row.payload === null ? null : (JSON.parse(row.payload) as Record<string, unknown>),
+    }));
+}
+
 function rawEventCount(): number {
   return db.select().from(rawEvents).all().length;
 }
@@ -187,6 +199,81 @@ describe('SessionService — entrance', () => {
         weightCaptureFailed: true,
         failureReason: 'stability_timeout',
         waitedMs: 15000,
+      },
+    ]);
+  });
+
+  it('records attemptsUsed in the audit log payload for a successful entrance capture', () => {
+    const result = service.handleEntranceReading({
+      rawPlate: 'ATMP0001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+      attemptsUsed: 2,
+    });
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
+      {
+        action: 'entry_captured',
+        payload: { weightKg: 20000, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 2 },
+      },
+    ]);
+  });
+
+  it('records attemptsUsed in the audit log payload on an entrance capture failure', () => {
+    const result = service.handleEntranceReading({
+      rawPlate: 'ATMP0002',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+      attemptsUsed: 3,
+    });
+    if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
+      {
+        action: 'entry_capture_failed',
+        payload: { weightKg: null, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 3 },
+      },
+    ]);
+  });
+
+  it('records attemptsUsed in the audit log payload on a retrigger', () => {
+    const first = service.handleEntranceReading({
+      rawPlate: 'ATMP0003',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 19000,
+      weightCaptureFailed: false,
+      attemptsUsed: 1,
+    });
+    if (first.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const second = service.handleEntranceReading({
+      rawPlate: 'ATMP0003',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 19500,
+      weightCaptureFailed: false,
+      attemptsUsed: 2,
+    });
+    if (second.kind !== 'ticket_retriggered') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(second.ticket.id)).toEqual([
+      {
+        action: 'entry_captured',
+        payload: { weightKg: 19000, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 1 },
+      },
+      {
+        action: 'entry_overwritten',
+        payload: { weightKg: 19500, cameraId: 'cam-entrance-1', isRetrigger: true, attemptsUsed: 2 },
       },
     ]);
   });
@@ -420,6 +507,88 @@ describe('SessionService — exit', () => {
     const scaleEvents = scaleRawEventsFor(result.ticket.id);
     expect(scaleEvents).toEqual([{ direction: 'exit', weightKg: 9000, weightCaptureFailed: false }]);
   });
+
+  it('records attemptsUsed in the audit log payload when closing on exit', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'ATMP0004',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const exit = service.handleExitReading({
+      rawPlate: 'ATMP0004',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 8000,
+      weightCaptureFailed: false,
+      attemptsUsed: 3,
+    });
+    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(exit.ticket.id)).toEqual([
+      expect.anything(),
+      {
+        action: 'exit_captured',
+        payload: { weightKg: 8000, cameraId: 'cam-exit-1', attemptsUsed: 3 },
+      },
+    ]);
+  });
+
+  it('records attemptsUsed in the audit log payload on an exit capture failure (pending exit)', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'ATMP0005',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 15000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const exit = service.handleExitReading({
+      rawPlate: 'ATMP0005',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: null,
+      weightCaptureFailed: true,
+      attemptsUsed: 3,
+    });
+    if (exit.kind !== 'exit_capture_pending') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(exit.ticket.id)).toEqual([
+      expect.anything(),
+      {
+        action: 'exit_capture_failed',
+        payload: { weightKg: null, cameraId: 'cam-exit-1', attemptsUsed: 3 },
+      },
+    ]);
+  });
+
+  it('records attemptsUsed in the audit log payload when flagging an anomaly', () => {
+    const result = service.handleExitReading({
+      rawPlate: 'ATMP0006',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 9000,
+      weightCaptureFailed: false,
+      attemptsUsed: 2,
+    });
+    if (result.kind !== 'anomaly_flagged') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
+      {
+        action: 'anomaly_flagged',
+        payload: { weightKg: 9000, cameraId: 'cam-exit-1', attemptsUsed: 2 },
+      },
+    ]);
+  });
 });
 
 describe('SessionService — internal trucks (pre-registered tare)', () => {
@@ -537,5 +706,31 @@ describe('SessionService — internal trucks (pre-registered tare)', () => {
     });
 
     expect(repo.findOpenByPlate('INT0005')).toBeUndefined();
+  });
+
+  it('records attemptsUsed for the real (scale) leg, but not for the via-tare leg', () => {
+    registerTruckWithActiveTare('INT0006', 9000);
+
+    const result = service.handleEntranceReading({
+      rawPlate: 'INT0006',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date(),
+      receivedAt: new Date(),
+      weightKg: 21000,
+      weightCaptureFailed: false,
+      attemptsUsed: 2,
+    });
+    if (result.kind !== 'ticket_closed_via_tare') throw new Error('unreachable');
+
+    expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
+      {
+        action: 'entry_captured',
+        payload: { weightKg: 21000, cameraId: 'cam-entrance-1', attemptsUsed: 2 },
+      },
+      {
+        action: 'internal_truck_exit_via_tare',
+        payload: { truckConjuntoId: expect.any(Number), tareWeightKg: 9000 },
+      },
+    ]);
   });
 });

@@ -36,6 +36,14 @@ export interface Ticket {
 
   createdAt: string;
   updatedAt: string;
+
+  /**
+   * True when a scale read on this ticket only resolved after a retry —
+   * worth a human glance, not a confirmed error. Only present on tickets
+   * returned by `listTickets` (see
+   * docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md).
+   */
+  suspectWeight?: boolean;
 }
 
 export interface AuditLogEntry {

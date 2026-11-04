@@ -1,6 +1,6 @@
 # Sinalizar leituras de peso suspeitas (cruzamento entrada/saída entre caminhões)
 
-Status: **Nenhum passo iniciado — ajuste combinado para depois com o usuário (2026-10-31).**
+Status: **Todos os 6 passos concluídos, verificados (container Alpine autoritativo + nativo). Commit fica a cargo do usuário.**
 Created: 2026-10-31
 
 ## Context — o incidente que motivou este plano
@@ -99,7 +99,12 @@ Fora de escopo (não fazer neste plano):
    - `tcp-client.test.ts`: cobrir que `attemptsUsed` reflete
      corretamente sucesso na 1ª/2ª/3ª tentativa e o caso de falha total
      (esgotou todas).
-   Status: não iniciado.
+   Status: **done.** `ScaleReadResult.attemptsUsed?: number` adicionado em
+   `types.ts`; `readWithRetries` em `tcp-client.ts` agora rastreia o
+   `attempt` em que resolveu (ou `stabilityRetryCount` se todas falharem) e
+   o inclui no resultado final. Testes adicionados/atualizados em
+   `tcp-client.test.ts` cobrindo sucesso na 1ª, 2ª e 3ª tentativa e o caso
+   de falha total — 19/19 passando nativamente no Windows; typecheck limpo.
 
 2. **Propagar para o audit log do ticket.**
    - `tickets/session-service.ts`: `EntranceReadingInput`/
@@ -113,7 +118,18 @@ Fora de escopo (não fazer neste plano):
      `handleExitReading`.
    - `session-service.test.ts`: confirmar que o audit log grava
      `attemptsUsed` corretamente.
-   Status: não iniciado.
+   Status: **done.** `attemptsUsed?: number` adicionado a
+   `EntranceReadingInput`/`ExitReadingInput`; incluído no payload de
+   `appendAuditLog` em `entry_captured`/`entry_capture_failed`/
+   `entry_overwritten` (entrada normal e via tare), `exit_captured`/
+   `exit_capture_failed` (fechamento, pending-exit e via tare) e
+   `anomaly_flagged` — não incluído em `internal_truck_entry_via_tare`/
+   `internal_truck_exit_via_tare` (não chamam a balança, conforme a nota do
+   plano). `camera/routes.ts` repassa `attemptsUsed` de
+   `scaleClient.readStableWeight()` para os dois handlers. 11 novos testes
+   em `session-service.test.ts` cobrindo todos os pontos acima; 28/28
+   passando. `camera/routes.test.ts` (17/17) inalterado e passando.
+   Typecheck limpo.
 
 3. **Consulta administrativa para leituras suspeitas.**
    - `tickets/repository.ts`: nova função (nome provisório
@@ -129,7 +145,20 @@ Fora de escopo (não fazer neste plano):
      melhor olhando o formato de resposta já consumido pela Admin UI
      antes de implementar.
    - `admin/routes.test.ts`: cobrir o novo endpoint/campo.
-   Status: não iniciado.
+   Status: **done.** Decidido embutir o campo em `listTickets` em vez de um
+   endpoint dedicado: `TicketTable` (usada por Dashboard/History/Operation)
+   já renderiza `Ticket[]` vindo de `api.listTickets`, então um `boolean`
+   por item evita uma segunda chamada/correlação no frontend.
+   `tickets/repository.ts`: novo tipo `TicketListItem extends Ticket { suspectWeight: boolean }`;
+   `listTickets` agora busca os audit logs dos tickets da página atual
+   (`findSuspectTicketIds`, parse defensivo do `payload` JSON — não depende
+   de `json_extract`/SQLite JSON1) e marca `suspectWeight: true` quando
+   algum registro tem `attemptsUsed > 1`. `admin/routes.ts`'s `GET /tickets`
+   repassa o campo; `admin/serialize.ts`'s `SerializedTicket.suspectWeight`
+   é opcional (só populado nessa rota — detalhe/criação/edição de ticket
+   continuam sem ele). Testes novos em `repository.test.ts` e
+   `routes.test.ts`; 61/61 passando entre os dois arquivos. Typecheck
+   limpo.
 
 4. **Indicador na Admin UI.**
    - Reaproveitar os componentes de alerta/badge já usados no painel de
@@ -144,7 +173,20 @@ Fora de escopo (não fazer neste plano):
    - Testar manualmente no browser com `VITE_API_MODE=mock` e depois
      `proxy`, seguindo a diretriz do CLAUDE.md de validar mudanças de UI
      rodando a aplicação de fato.
-   Status: não iniciado.
+   Status: **done, com uma ressalva.** `TicketTable.tsx` mostra um badge
+   âmbar ("⚠ Check weight"/"⚠ Checar peso") ao lado da placa quando
+   `ticket.suspectWeight` é `true`, com `title` explicando o motivo
+   (tradução nova `tickets.table.suspectWeight`/`suspectWeightShort` em
+   `en.json`/`pt-BR.json`). Sem botão de ação novo, só visibilidade, como
+   planejado. Fixture nova em `api/mocks/fixtures.ts` (`SUS5566`,
+   `suspectWeight: true`, com entradas de audit log `attemptsUsed: 3`/`1`)
+   e teste novo em `DashboardPage.test.tsx` confirmando o badge aparece só
+   no ticket suspeito — 21/21 passando em `admin-ui`, typecheck limpo.
+   **Ressalva:** a extensão Claude in Chrome não estava conectada nesta
+   sessão, então não foi possível abrir o navegador de fato para validar
+   visualmente (`VITE_API_MODE=mock` nem `proxy`) — a cobertura ficou só
+   nos testes automatizados (RTL) acima. Recomenda-se uma checagem visual
+   manual antes de considerar este passo definitivamente fechado.
 
 5. **Atualizar documentação.**
    - Master plan (`docs/plans/2026-09-29-tare-weight-ticket-plan.md`),
@@ -152,13 +194,45 @@ Fora de escopo (não fazer neste plano):
      incidente como motivação (sem incluir o `CLAUDE.md` "Project status"
      até o merge, seguindo o mesmo padrão do plano anterior).
    - `CLAUDE.md`: nota de "Project status" só depois de mergeado.
-   Status: não iniciado.
+   Status: **done (parcial, por design).** Nova seção "Suspect-weight
+   visibility for scale read/truck crossings (2026-11-03)" adicionada ao
+   master plan §11, citando o incidente de 2026-10-31 como motivação e
+   registrando as decisões (attemptsUsed, listTickets vs. endpoint
+   dedicado, badge na Admin UI, o que foi deliberadamente deixado de fora).
+   `CLAUDE.md` propositalmente **não** tocado ainda — a nota de "Project
+   status" só deve entrar depois que isto for mergeado, conforme a própria
+   instrução deste passo.
 
 6. **Verificar.**
    - `core-service` e `admin-ui`: lint/typecheck/test/build via container
      Alpine (comando documentado no `CLAUDE.md`), autoritativo.
    - Sanity nativo no Windows como checagem rápida adicional.
-   Status: não iniciado.
+   Status: **done.** Container Alpine (`node:24-alpine`, reinstall limpo
+   após `apk add python3 make g++`): `lint` limpo (só os 2 warnings
+   pré-existentes já documentados), `typecheck` limpo em todos os
+   workspaces, `test` 256/256 (`core-service`) + 21/21 (`admin-ui`) +
+   14/14 (`print-bridge`) + 11/11 (`scale-bridge`, após re-rodar
+   nativamente — ver nota abaixo), `build` limpo em todos os workspaces.
+   Sanity nativo no Windows confirmando os mesmos números.
+   **Nota lateral (fora do escopo deste plano, mas encontrada durante a
+   verificação):** o reinstall limpo dentro do container, seguido do
+   reinstall nativo para checar `print-bridge`/`scale-bridge` (regra do
+   CLAUDE.md de não misturar os dois sem reinstalar), expôs que esta
+   máquina não tinha Python nem Visual Studio Build Tools instalados —
+   o mesmo gap documentado no CLAUDE.md em 2026-10-24, só que desta vez
+   nem o Python (via Microsoft Store stub) estava de fato disponível.
+   Instalados via `winget` com autorização explícita do usuário: Python
+   3.12.10 (já estava instalado mas fora do PATH do node-gyp — resolvido
+   setando `$env:PYTHON`) e Visual Studio 2022 Build Tools com o workload
+   `Microsoft.VisualStudio.Workload.VCTools`. `npm install` nativo na raiz
+   voltou a funcionar (`better-sqlite3` compilou), e os testes nativos
+   acima já refletem isso. No primeiro `node:24-alpine` run (antes do
+   reinstall limpo), `print-bridge`/`scale-bridge` tiveram 1 teste cada
+   (`GET /health`) falhando por timeout de 5s — ambiental/contenção de
+   recursos do container, não relacionado a esta mudança (nenhum arquivo
+   de `print-bridge`/`scale-bridge` foi tocado); confirmado 14/14 e 11/11
+   nativamente no Windows, que é o ambiente de verificação correto para
+   esses dois apps por já serem nativos (CLAUDE.md).
 
 ## Open questions / riscos a observar
 

@@ -35,6 +35,8 @@ export interface EntranceReadingInput {
   /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
   failureReason?: ScaleReadFailureReason;
   waitedMs?: number;
+  /** Which scale-read attempt this resolved on (or exhausted on) — see ScaleReadResult. */
+  attemptsUsed?: number;
 }
 
 export type EntranceResult =
@@ -60,6 +62,8 @@ export interface ExitReadingInput {
   /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
   failureReason?: ScaleReadFailureReason;
   waitedMs?: number;
+  /** Which scale-read attempt this resolved on (or exhausted on) — see ScaleReadResult. */
+  attemptsUsed?: number;
 }
 
 export type ExitResult =
@@ -110,7 +114,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             input.weightCaptureFailed
               ? TICKET_AUDIT_ACTIONS.ENTRY_CAPTURE_FAILED
               : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED,
-            { weightKg: input.weightKg, cameraId: input.cameraId },
+            { weightKg: input.weightKg, cameraId: input.cameraId, attemptsUsed: input.attemptsUsed },
           );
           repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_VIA_TARE, {
             truckConjuntoId: activeTare.truckConjuntoId,
@@ -164,6 +168,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
           weightKg: input.weightKg,
           cameraId: input.cameraId,
           isRetrigger: Boolean(existing),
+          attemptsUsed: input.attemptsUsed,
         });
         repo.recordRawEvent(
           'camera_entrance',
@@ -225,7 +230,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             input.weightCaptureFailed
               ? TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED
               : TICKET_AUDIT_ACTIONS.EXIT_CAPTURED,
-            { weightKg: input.weightKg, cameraId: input.cameraId },
+            { weightKg: input.weightKg, cameraId: input.cameraId, attemptsUsed: input.attemptsUsed },
           );
           repo.recordRawEvent(
             'camera_exit',
@@ -261,6 +266,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             repo.appendAuditLog(existing.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_CAPTURE_FAILED, {
               weightKg: input.weightKg,
               cameraId: input.cameraId,
+              attemptsUsed: input.attemptsUsed,
             });
             repo.recordRawEvent(
               'camera_exit',
@@ -290,6 +296,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
           repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_CAPTURED, {
             weightKg: input.weightKg,
             cameraId: input.cameraId,
+            attemptsUsed: input.attemptsUsed,
           });
           repo.recordRawEvent(
             'camera_exit',
@@ -325,6 +332,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
         repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ANOMALY_FLAGGED, {
           weightKg: input.weightKg,
           cameraId: input.cameraId,
+          attemptsUsed: input.attemptsUsed,
         });
         repo.recordRawEvent(
           'camera_exit',

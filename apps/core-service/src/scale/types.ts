@@ -25,6 +25,8 @@ export interface ScaleReadResult {
   failureReason?: ScaleReadFailureReason;
   /** Wall-clock duration of this read attempt, in ms. Present on success and failure. */
   waitedMs?: number;
+  /** Which attempt (1-based) this resolved on, or stabilityRetryCount if every attempt failed. Present on success and failure. */
+  attemptsUsed?: number;
 }
 
 export interface ScaleStatus {

@@ -187,6 +187,11 @@ the Admin UI for context.
   - Plate unreadable/empty from camera payload → log to `raw_events` only,
     create nothing automatically, surface in Admin UI as an unresolved
     camera event needing manual ticket creation.
+    **Decision (2026-11-03):** the driver signal is also withheld in this
+    case, even when the scale read itself succeeds — see the matching note
+    under "Exit camera fires" below and §11 for the full rationale (an
+    unreadable plate means a captured weight can never be attributed to a
+    truck afterward, which blocks payment downstream).
 - **Exit camera fires** for plate `X`:
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
@@ -195,7 +200,12 @@ the Admin UI for context.
     without a recorded entrance) — do **not** guess; needs admin
     resolution. Do not print automatically.
   - Plate unreadable → same as entrance: logged, no automatic action, needs
-    admin.
+    admin. **Decision (2026-11-03):** driver signal withheld here too, for
+    the same reason as the entrance case above — with no plate, there is
+    no way to later tell which truck a captured exit weight belongs to.
+    The truck stays physically on the scale; an operator must intervene
+    on-site (no Admin UI screen for this specific intervention exists yet
+    — accepted as a known gap, not blocking this decision).
 - **Scale read timeout** (indicator never reports stable weight within a
   bounded time): retry up to `SCALE_STABILITY_RETRY_COUNT` times (default
   3), each attempt reconnecting and bounded by `SCALE_STABILITY_TIMEOUT_MS`
@@ -646,6 +656,18 @@ Decisions and lessons from Phases 4–5:
   the superseding decision in §5 under "Scale read timeout". The signal is
   withheld in that one case specifically, not generalized to every outcome
   as the original wording here said.
+  **Decision (2026-11-03):** a second, independent case now also withholds
+  the signal — an unreadable plate (`camera/normalize.ts`'s
+  `isReliablePlateRead` already computes this before the signal decision
+  is even made, so `camera/routes.ts` just checks `event.rawPlate === ''`
+  alongside `weightCaptureFailed`). Previously the signal fired on an
+  unreadable plate as long as the scale capture itself succeeded — the
+  code read the scale and decided the signal *before* the plate was ever
+  validated (plate validation happened later, inside
+  `session-service.ts`). User-flagged (2026-11-03): releasing a truck with
+  no readable plate means a captured weight can never be attributed to it
+  afterward, which silently blocks payment downstream for that truck. See
+  `docs/plans/2026-11-03-withhold-signal-on-unreadable-plate-plan.md`.
 - **The print bridge implements the master plan's documented *fallback*
   approach** (native process, localhost HTTP, outside Docker), not
   `usbipd-win` — that spike (§7 risk #1) hasn't happened and there's no
@@ -977,3 +999,69 @@ merge per `CLAUDE.md`):
   reasonably re-enable WAL for its better write concurrency under
   contention — worth re-checking this decision if the deployment topology
   ever changes.
+
+### Suspect-weight visibility for scale read/truck crossings (2026-11-03)
+
+- **Incident that motivated this (2026-10-31)**: plate `MLX7A45`'s
+  recorded entry weight (20940 kg) didn't match the real weight observed
+  on-site (16240 kg). Reconstructed from `raw_events`/`tickets`/
+  `ticket_audit_log`: `scale/tcp-client.ts` serializes all scale reads
+  through one `readQueue`, and each `readStableWeight()` call is simply
+  resolved by whichever stable frame the indicator reports next — with no
+  check that the plate behind that webhook is the truck physically on the
+  scale at that moment. In this incident, an unrelated truck's exit webhook
+  (arrived first, queued ahead) stole MLX7A45's real 16240 kg reading
+  (becoming a legitimate `ANOMALY`); MLX7A45's own entrance webhook,
+  delayed ~35s by ANPR/upload lag, only reached the front of the queue
+  after 2 full 30s stability timeouts (per the 2026-10-27 "never release
+  without a captured weight" rule) and, on its 3rd attempt 70s later,
+  captured a different truck's legitimate exit weight (20940 kg) instead.
+  The two *normal* reads in this sequence both resolved on the 1st attempt
+  in under 7s — the retried, slow read was the one that went wrong.
+- **Decision: detect and surface, don't try to prevent.** A real fix (e.g.
+  correlating weight settlement to camera webhook timestamps, or an
+  independent presence sensor) is a significant architecture change, out
+  of scope for the current ~200 trucks/day volume and with no new hardware
+  available today (§7). Instead, `ScaleReadResult` (`scale/types.ts`) and
+  `EntranceReadingInput`/`ExitReadingInput` (`tickets/session-service.ts`)
+  gained `attemptsUsed?: number` — the attempt number a read resolved on
+  (or `stabilityRetryCount` if every attempt failed) — threaded from
+  `tcp-client.ts`'s `readWithRetries` through to every ticket audit log
+  entry that already recorded `weightKg`/`cameraId` (entry/exit captured,
+  overwritten, capture-failed, anomaly-flagged; *not* the internal-truck
+  via-tare legs, which never call the scale).
+- **Surfaced via `listTickets`, not a dedicated endpoint.** `TicketRepository.listTickets`
+  (`tickets/repository.ts`) now returns `TicketListItem` (`Ticket &
+  { suspectWeight: boolean }`): for the current page's ticket ids, it scans
+  their audit log entries for any `attemptsUsed > 1` (parsed defensively
+  from the JSON `payload` column, not a DB-level `json_extract` query) and
+  flags the ticket. Chosen over a separate `GET /api/admin/weighings/suspect`
+  endpoint because `TicketTable` (`apps/admin-ui`) already renders
+  `Ticket[]` from this same call on the Dashboard, History, and Operation
+  pages — a boolean field needs no extra request or client-side
+  correlation. `admin/serialize.ts`'s `SerializedTicket.suspectWeight` is
+  optional and only populated by the `GET /api/admin/tickets` list route;
+  single-ticket responses (detail/create/edit/reprint) don't compute it.
+- **Admin UI**: `TicketTable` shows an amber badge next to the plate
+  ("⚠ Check weight" / "⚠ Checar peso") with a `title` tooltip when
+  `suspectWeight` is true — reusing the existing badge/color pattern from
+  `StatusBadge`/`HardwareStatusBadge` rather than a new component or
+  screen. Deliberately not a confirmed-error indicator — a truck can
+  legitimately need 2-3 attempts to settle for mundane reasons (a large
+  load settling slowly, mechanical noise), so the tooltip is worded as
+  "worth checking," not "confirmed wrong," and there's no new automatic
+  real-time alert (matching the already-decided no-auto-alert stance from
+  the 2026-10-27 capture-reliability plan). No new action button — the
+  correction path is still the existing manual `PATCH /tickets/:id/entry`
+  or `/exit`.
+- **Explicitly not done by this change**: tickets #257/#258 from the
+  2026-10-31 incident were not retroactively corrected (left for a manual
+  admin correction whenever the user chooses); no reduction of
+  `stabilityRetryCount`/`stabilityTimeoutMs` (that remains the deliberate
+  2026-10-27 decision); no weight↔camera correlation redesign. If the
+  volume of tickets flagged `suspectWeight` turns out to be high in
+  practice, that's the signal to revisit the out-of-scope correlation
+  redesign, not a reason to loosen this change's scope after the fact.
+- See `docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md` for the
+  full step-by-step record; delete that file once this entry is merged,
+  per `CLAUDE.md`'s working-document convention.

@@ -17,8 +17,12 @@ design decisions made along the way (most notably: `entryAt` is nullable to
 support `ANOMALY` tickets created from an exit-without-entrance event, scale
 timeouts are handled by the same entrance/exit handlers rather than a
 separate code path, each handler runs inside one SQLite transaction, and the
-driver signal fires right after every scale read — success or
-capture-failed — so the truck is never left stuck on the scale).
+driver signal fires right after every scale read except a failed weight
+capture — that one case deliberately withholds the signal instead (reversed
+2026-10-27 from an earlier "always signal, truck never stuck" rule once
+field reports showed it was letting an unrecoverable missing weight through
+silently; see master plan §5 "Scale read timeout" and §11 for the full
+history).
 
 In short: `core-service` has a Drizzle/SQLite schema and migrations
 (`src/db/`), a ticket repository (`src/tickets/repository.ts`) with tables

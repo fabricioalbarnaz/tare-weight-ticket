@@ -243,7 +243,9 @@
       "entry": "Entry",
       "exit": "Exit",
       "netWeight": "Net weight",
-      "empty": "No tickets found."
+      "empty": "No tickets found.",
+      "suspectWeightShort": "Check weight",
+      "suspectWeight": "A scale reading for this ticket only resolved after a retry — double-check it wasn't crossed with another truck on the scale around the same time."
     },
     "filters": {
       "searchPlaceholder": "Search by plate…"

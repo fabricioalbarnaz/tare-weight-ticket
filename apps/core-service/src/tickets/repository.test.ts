@@ -453,6 +453,53 @@ describe('TicketRepository', () => {
 
       expect(result.items.map((t) => t.plate)).toEqual(['SEARCH99']);
     });
+
+    it('flags suspectWeight when an audit log entry recorded attemptsUsed > 1', () => {
+      const suspect = repo.create({
+        plate: 'SUSP0001',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(suspect.id, 'system', 'entry_captured', {
+        weightKg: 1000,
+        cameraId: 'cam-1',
+        attemptsUsed: 3,
+      });
+
+      const normal = repo.create({
+        plate: 'SUSP0002',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(normal.id, 'system', 'entry_captured', {
+        weightKg: 1000,
+        cameraId: 'cam-1',
+        attemptsUsed: 1,
+      });
+
+      const noAttemptsField = repo.create({
+        plate: 'SUSP0003',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(noAttemptsField.id, 'system', 'entry_captured', {
+        weightKg: 1000,
+        cameraId: 'cam-1',
+      });
+
+      const result = repo.listTickets({});
+
+      const byId = new Map(result.items.map((t) => [t.id, t.suspectWeight]));
+      expect(byId.get(suspect.id)).toBe(true);
+      expect(byId.get(normal.id)).toBe(false);
+      expect(byId.get(noAttemptsField.id)).toBe(false);
+    });
   });
 
   describe('listUnresolvedEvents', () => {

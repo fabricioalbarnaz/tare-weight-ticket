@@ -159,6 +159,23 @@ describe('GET /api/admin/tickets', () => {
     expect(openOnly.json().items).toHaveLength(1);
     expect(openOnly.json().items[0].plate).toBe('OPEN0001');
   });
+
+  it('flags suspectWeight on tickets whose audit log recorded a retried scale read', async () => {
+    const cookie = await loginCookie();
+    const suspect = createOpenTicket('SUSP0001');
+    repo.appendAuditLog(suspect.id, 'system', 'entry_captured', {
+      weightKg: 20000,
+      cameraId: 'cam-1',
+      attemptsUsed: 3,
+    });
+    createOpenTicket('NORMAL01');
+
+    const response = await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } });
+    const items: Array<{ plate: string; suspectWeight: boolean }> = response.json().items;
+
+    expect(items.find((i) => i.plate === 'SUSP0001')?.suspectWeight).toBe(true);
+    expect(items.find((i) => i.plate === 'NORMAL01')?.suspectWeight).toBe(false);
+  });
 });
 
 describe('GET /api/admin/tickets/:id', () => {

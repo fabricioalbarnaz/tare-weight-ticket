@@ -26,6 +26,8 @@ export interface SerializedTicket {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Only present on `listTickets` results — see `TicketListItem`. */
+  suspectWeight?: boolean;
 }
 
 export interface SerializedAuditLogEntry {

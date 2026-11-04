@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, isNull, like, lte, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, like, lte, sql } from 'drizzle-orm';
 import {
   tickets,
   ticketAuditLog,
@@ -15,6 +15,17 @@ export type Ticket = typeof tickets.$inferSelect;
 export type TicketAuditLogEntry = typeof ticketAuditLog.$inferSelect;
 export type RawEvent = typeof rawEvents.$inferSelect;
 export type AdminUser = typeof adminUsers.$inferSelect;
+
+/**
+ * A ticket as returned by `listTickets`, flagged when any of its audit log
+ * entries recorded a scale read that needed more than one attempt — see
+ * docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md. Not a
+ * confirmed error, just worth a human glance: a truck can legitimately take
+ * a couple of retries to settle.
+ */
+export interface TicketListItem extends Ticket {
+  suspectWeight: boolean;
+}
 
 export interface Paginated<T> {
   items: T[];
@@ -75,7 +86,7 @@ export interface FlagAnomalyInput {
 export interface TicketRepository {
   findOpenByPlate(plate: string): Ticket | undefined;
   findById(ticketId: number): Ticket | undefined;
-  listTickets(query: ListTicketsQuery): Paginated<Ticket>;
+  listTickets(query: ListTicketsQuery): Paginated<TicketListItem>;
   listUnresolvedEvents(query: ListUnresolvedEventsQuery): Paginated<RawEvent>;
   findAuditLogByTicketId(ticketId: number): TicketAuditLogEntry[];
   findAdminUserByUsername(username: string): AdminUser | undefined;
@@ -112,6 +123,37 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
       throw new Error(`Ticket ${ticketId} not found`);
     }
     return ticket;
+  }
+
+  /**
+   * Ticket ids among `ticketIds` with at least one audit log entry whose
+   * payload recorded `attemptsUsed > 1` (a scale read that only resolved
+   * after a retry — see docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md).
+   * Payload is a loosely-typed JSON blob (`appendAuditLog`'s `payload?: unknown`),
+   * so this parses defensively rather than relying on a DB-level JSON query.
+   */
+  function findSuspectTicketIds(ticketIds: number[]): Set<number> {
+    const entries = db
+      .select({ ticketId: ticketAuditLog.ticketId, payload: ticketAuditLog.payload })
+      .from(ticketAuditLog)
+      .where(inArray(ticketAuditLog.ticketId, ticketIds))
+      .all();
+
+    const suspectIds = new Set<number>();
+    for (const entry of entries) {
+      if (!entry.payload) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(entry.payload);
+      } catch {
+        continue;
+      }
+      const attemptsUsed = (parsed as { attemptsUsed?: unknown } | null)?.attemptsUsed;
+      if (typeof attemptsUsed === 'number' && attemptsUsed > 1) {
+        suspectIds.add(entry.ticketId);
+      }
+    }
+    return suspectIds;
   }
 
   return {
@@ -159,7 +201,13 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         total: 0,
       };
 
-      return { items, total, page, pageSize };
+      const suspectTicketIds = items.length > 0 ? findSuspectTicketIds(items.map((t) => t.id)) : new Set<number>();
+      const itemsWithSuspectFlag = items.map((item) => ({
+        ...item,
+        suspectWeight: suspectTicketIds.has(item.id),
+      }));
+
+      return { items: itemsWithSuspectFlag, total, page, pageSize };
     },
 
     listUnresolvedEvents(query) {

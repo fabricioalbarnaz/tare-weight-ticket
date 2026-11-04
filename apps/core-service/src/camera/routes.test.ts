@@ -200,27 +200,31 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(driverSignalCalls).toEqual([]);
   });
 
-  it('creates no ticket when the plate is missing from the payload', async () => {
+  it('creates no ticket and withholds the driver signal when the plate is missing from the payload', async () => {
     const response = await postEntrance({ plate: null });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
-    // The truck was still on the scale — it must still get the move-on signal.
-    expect(driverSignalCalls).toEqual(['in']);
+    // With no readable plate, a captured weight can never be attributed to
+    // a truck afterward — the truck must stay held for an operator, not be
+    // released (see docs/plans/2026-11-03-withhold-signal-on-unreadable-plate-plan.md).
+    expect(driverSignalCalls).toEqual([]);
   });
 
-  it('creates no ticket when confidence is below the reliability threshold', async () => {
+  it('creates no ticket and withholds the driver signal when confidence is below the reliability threshold', async () => {
     const response = await postEntrance({ plate: 'LOWCONF', confidence: 50 });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+    expect(driverSignalCalls).toEqual([]);
   });
 
-  it('creates no ticket when the plate is shorter than expected (likely truncated read)', async () => {
+  it('creates no ticket and withholds the driver signal when the plate is shorter than expected (likely truncated read)', async () => {
     const response = await postEntrance({ plate: 'V0694', confidence: 99 });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+    expect(driverSignalCalls).toEqual([]);
   });
 
   it('rejects a request with no anpr.xml part', async () => {
@@ -299,11 +303,12 @@ describe('POST /webhooks/camera/exit', () => {
     expect(printCalls).toBe(0);
   });
 
-  it('creates no ticket when the plate is missing from the payload', async () => {
+  it('creates no ticket and withholds the driver signal when the plate is missing from the payload', async () => {
     const response = await postExit({ plate: null });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+    expect(driverSignalCalls).toEqual([]);
   });
 });
 
