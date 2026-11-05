@@ -1259,3 +1259,29 @@ merge per `CLAUDE.md`):
   + raw file backup before touching the container) described in that
   section, and is what surfaced the gap between "merged" and "actually
   running in production" in the first place.
+
+### entryAt/exitAt moved from webhook receipt to weighing completion (2026-11-04)
+
+- **Decision reversed**: `entryAt`/`exitAt` (and so the date/time printed
+  on the physical ticket) previously came from a server-clock timestamp
+  captured in `camera/routes.ts` **before** the scale's stability wait —
+  i.e. the instant the truck crossed the camera, not when its weight was
+  actually captured. Per user request, this now captures a fresh
+  timestamp right after `scaleClient.readStableWeight()` resolves (success
+  or timeout), and that is what becomes `entryAt`/`exitAt` — the moment
+  the weighing itself finishes, for both the entrance and exit legs.
+- **What didn't change**: the camera's own `dateTime` is still untrusted
+  for this (clock drift) and stays forensic-only in `rawEvents`. The
+  post-release debounce check (§11 "Post-release camera debounce") still
+  uses the pre-scale-wait instant (renamed `triggeredAt` in
+  `camera/routes.ts`) — that check is about when the truck physically
+  re-triggered a camera, not about the weighing, so it was left alone.
+- **Internal trucks (tare-based close)**: unaffected beyond the rename —
+  a single `weighingFinishedAt` still backs both legs of a ticket closed
+  in one webhook call (entrance-via-tare or exit-via-tare), same as the
+  single `receivedAt` did before.
+- **Renames**: `EntranceReadingInput.receivedAt`/`ExitReadingInput.receivedAt`
+  (`tickets/session-service.ts`) → `weighingFinishedAt`.
+- See `docs/plans/2026-11-04-ticket-timestamp-from-weighing-plan.md` for
+  the step-by-step change (deleted once merged, per the working-document
+  convention).

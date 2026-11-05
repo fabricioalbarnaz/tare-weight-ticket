@@ -69,12 +69,12 @@ function checkPostReleaseDebounce(
   reply: FastifyReply,
   direction: 'entrance' | 'exit',
   event: NormalizedCameraEvent,
-  receivedAt: Date,
+  triggeredAt: Date,
 ): boolean {
   const lastExitAt = options.getMostRecentExitAt();
   if (lastExitAt === null) return false;
 
-  const msSinceLastExit = receivedAt.getTime() - lastExitAt.getTime();
+  const msSinceLastExit = triggeredAt.getTime() - lastExitAt.getTime();
   if (msSinceLastExit < 0 || msSinceLastExit >= options.postReleaseDebounceMs) return false;
 
   request.log.warn(
@@ -84,7 +84,7 @@ function checkPostReleaseDebounce(
   options.recordRawEvent(direction === 'entrance' ? 'camera_entrance' : 'camera_exit', {
     rawPlate: event.rawPlate,
     cameraId: event.cameraId,
-    receivedAt,
+    triggeredAt,
     discarded: 'post_release_debounce',
     msSinceLastExit,
   });
@@ -94,11 +94,13 @@ function checkPostReleaseDebounce(
 
 export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
   app.post('/webhooks/camera/entrance', async (request, reply) => {
-    // Captured before the scale wait so entryAt reflects when the truck
-    // actually crossed the camera, not when the (possibly multi-second)
-    // stable-weight read finished. The camera's own `dateTime` is not
-    // trusted for this — its clock isn't kept in sync with the server.
-    const receivedAt = new Date();
+    // Captured before the scale wait — only used for the post-release
+    // debounce check below, which is about when the truck physically
+    // re-triggered the camera, not when its weighing finished. entryAt
+    // itself comes from `weighingFinishedAt`, captured after the scale
+    // read below. The camera's own `dateTime` is not trusted for either —
+    // its clock isn't kept in sync with the server.
+    const triggeredAt = new Date();
 
     const xml = await readAnprXmlPart(request, reply);
     if (xml === null) return;
@@ -112,19 +114,23 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, receivedAt)) return;
+    if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, triggeredAt)) return;
 
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'entrance',
       plate: event.rawPlate,
     });
+    // Captured right after the scale read settles (or gives up) — this is
+    // entryAt: the moment the weighing itself finished, not when the truck
+    // crossed the camera (see docs/plans/2026-11-04-ticket-timestamp-from-weighing-plan.md).
+    const weighingFinishedAt = new Date();
 
     const result = options.sessionService.handleEntranceReading({
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
-      receivedAt,
+      weighingFinishedAt,
       weightKg,
       weightCaptureFailed,
       failureReason,
@@ -172,9 +178,9 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
   });
 
   app.post('/webhooks/camera/exit', async (request, reply) => {
-    // See the matching comment in the entrance handler — captured before
-    // the scale wait, not trusted from the camera's own `dateTime`.
-    const receivedAt = new Date();
+    // See the matching comment in the entrance handler — triggeredAt is
+    // debounce-only, exitAt comes from weighingFinishedAt below.
+    const triggeredAt = new Date();
 
     const xml = await readAnprXmlPart(request, reply);
     if (xml === null) return;
@@ -188,19 +194,21 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
-    if (checkPostReleaseDebounce(options, request, reply, 'exit', event, receivedAt)) return;
+    if (checkPostReleaseDebounce(options, request, reply, 'exit', event, triggeredAt)) return;
 
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'exit',
       plate: event.rawPlate,
     });
+    // See the matching comment in the entrance handler.
+    const weighingFinishedAt = new Date();
 
     const result = options.sessionService.handleExitReading({
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
-      receivedAt,
+      weighingFinishedAt,
       weightKg,
       weightCaptureFailed,
       failureReason,

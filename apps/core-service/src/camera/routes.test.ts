@@ -19,12 +19,19 @@ let repo: TicketRepository;
 let truckRepo: TruckRepository;
 let app: FastifyInstance;
 let nextScaleReading: ScaleReadResult;
+/** Artificial delay before readStableWeight resolves — see the weighing-finished-timestamp tests below. */
+let scaleReadDelayMs: number;
 let driverSignalCalls: DriverSignalDirection[];
 let printCalls: number;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function createFakeScaleClient(): ScaleClient {
   return {
     async readStableWeight() {
+      if (scaleReadDelayMs > 0) await delay(scaleReadDelayMs);
       return nextScaleReading;
     },
     getStatus() {
@@ -65,6 +72,7 @@ beforeEach(() => {
   repo = createTicketRepository(db);
   truckRepo = createTruckRepository(db);
   nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+  scaleReadDelayMs = 0;
   driverSignalCalls = [];
   printCalls = 0;
   app = buildApp({
@@ -173,6 +181,23 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(driverSignalCalls).toEqual(['in']);
   });
 
+  it('sets entryAt to when the scale read finishes, not when the webhook was received', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    scaleReadDelayMs = 100;
+
+    const beforeRequest = Date.now();
+    await postEntrance({ plate: 'WGHT001' });
+    const afterRequest = Date.now();
+
+    const ticket = repo.findOpenByPlate('WGHT001');
+    const entryAtMs = ticket?.entryAt?.getTime() ?? 0;
+    // entryAt must land after the scale's artificial delay, not at webhook
+    // receipt (which would be ~0ms into the request) — see
+    // docs/plans/2026-11-04-ticket-timestamp-from-weighing-plan.md.
+    expect(entryAtMs).toBeGreaterThanOrEqual(beforeRequest + scaleReadDelayMs);
+    expect(entryAtMs).toBeLessThanOrEqual(afterRequest);
+  });
+
   it('ignores an extra JPEG-like part instead of erroring', async () => {
     const response = await postEntrance({ plate: 'JPEG001', includeExtraJpegPart: true });
 
@@ -276,6 +301,22 @@ describe('POST /webhooks/camera/entrance', () => {
 });
 
 describe('POST /webhooks/camera/exit', () => {
+  it('sets exitAt to when the scale read finishes, not when the webhook was received', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'WGHT002' });
+
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    scaleReadDelayMs = 100;
+    const beforeRequest = Date.now();
+    const exit = await postExit({ plate: 'WGHT002' });
+    const afterRequest = Date.now();
+
+    const ticket = repo.findById(exit.json().ticketId);
+    const exitAtMs = ticket?.exitAt?.getTime() ?? 0;
+    expect(exitAtMs).toBeGreaterThanOrEqual(beforeRequest + scaleReadDelayMs);
+    expect(exitAtMs).toBeLessThanOrEqual(afterRequest);
+  });
+
   it('closes the open ticket and computes net weight', async () => {
     nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
     await postEntrance({ plate: 'LOAD001' });

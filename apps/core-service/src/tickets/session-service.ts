@@ -19,15 +19,16 @@ export const TICKET_AUDIT_ACTIONS = {
 export interface EntranceReadingInput {
   rawPlate: string;
   cameraId: string;
-  /** Camera-reported event time — forensic only, see `receivedAt`. */
+  /** Camera-reported event time — forensic only, see `weighingFinishedAt`. */
   timestamp: Date;
   /**
-   * Server clock time at webhook receipt, captured before the scale wait.
-   * This is the authoritative source for `entryAt` — the camera's own
-   * `timestamp` is not trusted for it, since the camera's clock can drift
-   * or be misconfigured independently of the server.
+   * Server clock time right after the scale read settled (or gave up) —
+   * i.e. when the weighing itself finished, not when the truck crossed
+   * the camera. This is the authoritative source for `entryAt` — the
+   * camera's own `timestamp` is not trusted for it, since the camera's
+   * clock can drift or be misconfigured independently of the server.
    */
-  receivedAt: Date;
+  weighingFinishedAt: Date;
   /** The stable weight read from the scale, or null if the read timed out. */
   weightKg: number | null;
   /** True when the scale never reported a stable weight within the timeout. */
@@ -49,14 +50,15 @@ export type EntranceResult =
 export interface ExitReadingInput {
   rawPlate: string;
   cameraId: string;
-  /** Camera-reported event time — forensic only, see `receivedAt`. */
+  /** Camera-reported event time — forensic only, see `weighingFinishedAt`. */
   timestamp: Date;
   /**
-   * Server clock time at webhook receipt, captured before the scale wait.
-   * This is the authoritative source for `exitAt` — see the matching note
-   * on `EntranceReadingInput.receivedAt`.
+   * Server clock time right after the scale read settled (or gave up) —
+   * i.e. when the weighing itself finished, not when the truck crossed
+   * the camera. This is the authoritative source for `exitAt` — see the
+   * matching note on `EntranceReadingInput.weighingFinishedAt`.
    */
-  receivedAt: Date;
+  weighingFinishedAt: Date;
   weightKg: number | null;
   weightCaptureFailed: boolean;
   /** Only set when weightCaptureFailed is true — see ScaleReadResult. */
@@ -96,13 +98,13 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
         return repo.transaction((): EntranceResult => {
           const opened = repo.create({
             plate,
-            entryAt: input.receivedAt,
+            entryAt: input.weighingFinishedAt,
             entryWeightKg: input.weightKg,
             entryCameraId: input.cameraId,
             entryCaptureFailed: input.weightCaptureFailed,
           });
           const ticket = repo.close(opened.id, {
-            exitAt: input.receivedAt,
+            exitAt: input.weighingFinishedAt,
             exitWeightKg: activeTare.tareWeightKg,
             exitCameraId: null,
             exitCaptureFailed: false,
@@ -151,14 +153,14 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
 
         const ticket = existing
           ? repo.updateEntry(existing.id, {
-              entryAt: input.receivedAt,
+              entryAt: input.weighingFinishedAt,
               entryWeightKg: input.weightKg,
               entryCameraId: input.cameraId,
               entryCaptureFailed: input.weightCaptureFailed,
             })
           : repo.create({
               plate,
-              entryAt: input.receivedAt,
+              entryAt: input.weighingFinishedAt,
               entryWeightKg: input.weightKg,
               entryCameraId: input.cameraId,
               entryCaptureFailed: input.weightCaptureFailed,
@@ -208,13 +210,13 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
         return repo.transaction((): ExitResult => {
           const opened = repo.create({
             plate,
-            entryAt: input.receivedAt,
+            entryAt: input.weighingFinishedAt,
             entryWeightKg: activeTare.tareWeightKg,
             entryCameraId: null,
             entryCaptureFailed: false,
           });
           const ticket = repo.close(opened.id, {
-            exitAt: input.receivedAt,
+            exitAt: input.weighingFinishedAt,
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,
             exitCaptureFailed: input.weightCaptureFailed,
@@ -288,7 +290,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
           }
 
           const ticket = repo.close(existing.id, {
-            exitAt: input.receivedAt,
+            exitAt: input.weighingFinishedAt,
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,
             exitCaptureFailed: false,
@@ -324,7 +326,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
 
         const ticket = repo.flagAnomaly({
           plate,
-          exitAt: input.receivedAt,
+          exitAt: input.weighingFinishedAt,
           exitWeightKg: input.weightKg,
           exitCameraId: input.cameraId,
           exitCaptureFailed: input.weightCaptureFailed,
