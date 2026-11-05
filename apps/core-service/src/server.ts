@@ -38,7 +38,12 @@ const adminUiDir = fs.existsSync(path.join(configuredAdminUiDir, 'index.html'))
 // via loggerInstance, so a scale read and the webhook that triggered it (and
 // the scale-level connect/parse events that have no HTTP request at all)
 // all land in one JSON stream with one shape.
-const logger = pino();
+// LOG_LEVEL defaults to 'info'; set it to 'debug' on-site to also capture
+// the scale client's per-frame "weight sample captured" lines (one per raw
+// reading received during an active entrance/exit read) — the raw timeline
+// behind a stability_timeout/retry exhaustion, otherwise only visible as
+// the final pass/fail summary line.
+const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const { db } = createDb(dbPath);
 

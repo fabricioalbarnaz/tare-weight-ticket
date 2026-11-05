@@ -30,6 +30,12 @@ export interface ScaleClientOptions {
 
 type Waiter = (frame: ParsedWeightFrame | null) => void;
 
+/** The read currently waiting on the connection's data handler, so every raw frame it sees while waiting can be logged tagged with that read's own context (direction/plate/attempt) — see the `sock.on('data', ...)` handler below. */
+interface ActiveRead {
+  log: ScaleLogger;
+  meta: Record<string, unknown>;
+}
+
 const KEEP_ALIVE_DELAY_MS = 10_000;
 
 const noopLogger: ScaleLogger = {
@@ -58,6 +64,10 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
   let connectPromise: Promise<net.Socket> | null = null;
   let waiters: Waiter[] = [];
   let lastSeenAt: Date | null = null;
+  // Set only while a readOne() is actually waiting on a frame, so the data
+  // handler never logs the continuous idle stream between reads — just the
+  // samples captured during an entrance/exit attempt (master plan §5/§11).
+  let activeRead: ActiveRead | null = null;
   // The scale is one physical resource: serialize reads so two concurrent
   // webhooks (entrance/exit) can never both be resolved by the same frame.
   let readQueue: Promise<ScaleReadResult> = Promise.resolve({
@@ -115,6 +125,12 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
         sock.on('data', (chunk: Buffer) => {
           if (!parser) return;
           for (const frame of parser.push(chunk)) {
+            if (activeRead) {
+              activeRead.log.debug(
+                { ...activeRead.meta, weightKg: frame.weightKg, stable: frame.stable },
+                'scale: weight sample captured',
+              );
+            }
             if (!frame.stable) continue;
             lastSeenAt = new Date();
             const pending = waiters;
@@ -157,36 +173,41 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
       return { weightKg: null, weightCaptureFailed: true, failureReason, waitedMs };
     }
 
-    return new Promise<ScaleReadResult>((resolve) => {
-      const waiter: Waiter = (frame) => {
-        clearTimeout(timer);
-        const waitedMs = Date.now() - startedAt;
+    activeRead = { log, meta };
+    try {
+      return await new Promise<ScaleReadResult>((resolve) => {
+        const waiter: Waiter = (frame) => {
+          clearTimeout(timer);
+          const waitedMs = Date.now() - startedAt;
 
-        if (frame === null) {
-          // Only reached when the connection itself failed/closed while this
-          // waiter was still pending (the stability-timeout path below
-          // removes itself from `waiters` before ever tearing down).
-          log.warn({ ...meta, waitedMs, failureReason: 'socket_error' }, 'scale read failed: connection lost while waiting for a stable reading');
-          resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'socket_error', waitedMs });
-          return;
-        }
+          if (frame === null) {
+            // Only reached when the connection itself failed/closed while this
+            // waiter was still pending (the stability-timeout path below
+            // removes itself from `waiters` before ever tearing down).
+            log.warn({ ...meta, waitedMs, failureReason: 'socket_error' }, 'scale read failed: connection lost while waiting for a stable reading');
+            resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'socket_error', waitedMs });
+            return;
+          }
 
-        log.info({ ...meta, waitedMs, weightKg: frame.weightKg }, 'scale read succeeded');
-        resolve({ weightKg: frame.weightKg, weightCaptureFailed: false, waitedMs });
-      };
+          log.info({ ...meta, waitedMs, weightKg: frame.weightKg }, 'scale read succeeded');
+          resolve({ weightKg: frame.weightKg, weightCaptureFailed: false, waitedMs });
+        };
 
-      const timer = setTimeout(() => {
-        waiters = waiters.filter((pending) => pending !== waiter);
-        // Force a reconnect on the next read: otherwise a frame that settles
-        // just after this timeout could answer a later, unrelated read.
-        teardown();
-        const waitedMs = Date.now() - startedAt;
-        log.warn({ ...meta, waitedMs, failureReason: 'stability_timeout' }, 'scale read failed: no stable weight within timeout');
-        resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout', waitedMs });
-      }, options.stabilityTimeoutMs);
+        const timer = setTimeout(() => {
+          waiters = waiters.filter((pending) => pending !== waiter);
+          // Force a reconnect on the next read: otherwise a frame that settles
+          // just after this timeout could answer a later, unrelated read.
+          teardown();
+          const waitedMs = Date.now() - startedAt;
+          log.warn({ ...meta, waitedMs, failureReason: 'stability_timeout' }, 'scale read failed: no stable weight within timeout');
+          resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout', waitedMs });
+        }, options.stabilityTimeoutMs);
 
-      waiters.push(waiter);
-    });
+        waiters.push(waiter);
+      });
+    } finally {
+      activeRead = null;
+    }
   }
 
   async function readWithRetries(context?: ScaleReadContext): Promise<ScaleReadResult> {

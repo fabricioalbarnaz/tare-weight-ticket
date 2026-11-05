@@ -367,6 +367,86 @@ describe('createTcpScaleClient', () => {
       expect(warnLogs[0]?.obj.failureReason).toBe('connect_error');
     });
 
+    it('logs a debug line for every raw frame seen while waiting, stable or not, tagged with direction/plate/attempt', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      const readPromise = client.readStableWeight({ direction: 'entrance', plate: 'ABC1234' });
+      await server.waitForConnection();
+      server.send('US,19980');
+      server.send('US,19995');
+      server.send('ST,20000');
+      await readPromise;
+
+      const sampleLogs = calls.filter((c) => c.level === 'debug' && c.msg === 'scale: weight sample captured');
+      expect(sampleLogs.map((c) => c.obj.weightKg)).toEqual([19980, 19995, 20000]);
+      expect(sampleLogs.map((c) => c.obj.stable)).toEqual([false, false, true]);
+      expect(sampleLogs.every((c) => c.obj.direction === 'entrance' && c.obj.plate === 'ABC1234' && c.obj.attempt === 1)).toBe(
+        true,
+      );
+    });
+
+    it('does not log sample frames received before a read is pending or after it has settled', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 1000,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      const readPromise = client.readStableWeight();
+      await server.waitForConnection();
+      server.send('ST,20000');
+      await readPromise;
+
+      // Sent after the read already resolved — must not produce a sample log.
+      server.send('US,1');
+
+      const sampleLogs = calls.filter((c) => c.level === 'debug' && c.msg === 'scale: weight sample captured');
+      expect(sampleLogs).toHaveLength(1);
+    });
+
+    it('tags each retry attempt\'s sample logs with its own attempt number', async () => {
+      server = await startMockScaleServer();
+      const { logger, calls } = createCapturingLogger();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: 300,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+        logger,
+      });
+
+      const readPromise = client.readStableWeight();
+      await server.waitForConnection();
+      server.send('US,100');
+      // First attempt times out without ever stabilizing.
+
+      await server.waitForConnection(2);
+      server.send('US,200');
+      server.send('ST,300');
+
+      await expect(readPromise).resolves.toMatchObject({ weightKg: 300, attemptsUsed: 2 });
+
+      const sampleLogs = calls.filter((c) => c.level === 'debug' && c.msg === 'scale: weight sample captured');
+      expect(sampleLogs.map((c) => [c.obj.attempt, c.obj.weightKg])).toEqual([
+        [1, 100],
+        [2, 200],
+        [2, 300],
+      ]);
+    });
+
     it('prefers the per-call context logger over the client logger, and includes direction/plate', async () => {
       server = await startMockScaleServer();
       const clientLogger = createCapturingLogger();
