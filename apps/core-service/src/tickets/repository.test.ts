@@ -575,6 +575,52 @@ describe('TicketRepository', () => {
     });
   });
 
+  describe('findMostRecentExitAt', () => {
+    it('returns null when no ticket has ever closed', () => {
+      repo.create({
+        plate: 'OPEN0001',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentExitAt()).toBeNull();
+    });
+
+    it('returns the exitAt of the most recently closed ticket, across different plates', () => {
+      const first = repo.create({
+        plate: 'EXIT0001',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(first.id, {
+        exitAt: new Date('2026-01-01T09:00:00Z'),
+        exitWeightKg: 8000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      const second = repo.create({
+        plate: 'EXIT0002',
+        entryAt: new Date('2026-01-01T10:00:00Z'),
+        entryWeightKg: 21000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(second.id, {
+        exitAt: new Date('2026-01-01T11:00:00Z'),
+        exitWeightKg: 9000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentExitAt()).toEqual(new Date('2026-01-01T11:00:00Z'));
+    });
+  });
+
   describe('findAdminUserByUsername', () => {
     it('finds a seeded admin user by username', () => {
       db.insert(adminUsers)

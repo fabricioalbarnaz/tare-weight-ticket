@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNull, like, lte, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, like, lte, sql } from 'drizzle-orm';
 import {
   tickets,
   ticketAuditLog,
@@ -92,6 +92,16 @@ export interface TicketRepository {
   findAdminUserByUsername(username: string): AdminUser | undefined;
   /** Timestamp of the most recent raw event received from this source, or null if none ever arrived. */
   findLastEventTimestamp(source: RawEventSource): Date | null;
+  /**
+   * `exitAt` of the most recently closed ticket (any closing path,
+   * including an internal truck's tare-based close), or null if no ticket
+   * has ever closed. Deliberately not scoped by plate — anchors the camera
+   * post-release debounce (see
+   * docs/plans/2026-11-03-camera-post-release-debounce-plan.md), which
+   * exists precisely because a truck rollback can trigger a camera reading
+   * the *other* plate of the same articulated rig (tractor vs. trailer).
+   */
+  findMostRecentExitAt(): Date | null;
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
@@ -247,6 +257,17 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
 
     findAdminUserByUsername(username) {
       return db.select().from(adminUsers).where(eq(adminUsers.username, username)).get();
+    },
+
+    findMostRecentExitAt() {
+      const row = db
+        .select({ exitAt: tickets.exitAt })
+        .from(tickets)
+        .where(isNotNull(tickets.exitAt))
+        .orderBy(desc(tickets.exitAt))
+        .limit(1)
+        .get();
+      return row?.exitAt ?? null;
     },
 
     findLastEventTimestamp(source) {

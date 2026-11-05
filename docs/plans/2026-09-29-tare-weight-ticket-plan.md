@@ -192,6 +192,16 @@ the Admin UI for context.
     under "Exit camera fires" below and §11 for the full rationale (an
     unreadable plate means a captured weight can never be attributed to a
     truck afterward, which blocks payment downstream).
+- **Post-release debounce (2026-11-03):** before either camera handler
+  below does anything else (scale read, driver signal, session logic), it
+  discards the webhook outright if it arrives within
+  `CAMERA_POST_RELEASE_DEBOUNCE_MS` (default 15s) of the most recently
+  closed ticket — **regardless of which plate it reports**. A released
+  truck rolling back slightly can re-trigger either camera; because this
+  fleet is articulated (tractor + trailer, each with its own plate), the
+  spurious read reports the *other* plate of the same rig, not a repeat of
+  the one already on file, so a same-plate check can't catch it. See §11
+  for the production incident and the rejected same-plate alternative.
 - **Exit camera fires** for plate `X`:
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
@@ -1063,5 +1073,51 @@ merge per `CLAUDE.md`):
   practice, that's the signal to revisit the out-of-scope correlation
   redesign, not a reason to loosen this change's scope after the fact.
 - See `docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md` for the
+  full step-by-step record; delete that file once this entry is merged,
+  per `CLAUDE.md`'s working-document convention.
+
+### Post-release camera debounce (2026-11-03)
+
+- **Incident that motivated this**: after a truck is weighed and released,
+  it sometimes rolls back slightly while pulling away, re-triggering a
+  camera. The user confirmed both cameras can be affected (not just the
+  one that normally reads the rear plate). Because this fleet is
+  articulated (tractor + trailer, each carrying its own plate), the
+  spurious re-trigger reads whichever end of the rig is now in front of
+  that camera — the *other* plate from the one on file — not a duplicate
+  of the plate already known. Concretely: a spurious exit read finds no
+  open ticket for that (different) plate and used to raise a false
+  `ANOMALY`; a spurious entrance read likewise finds nothing and used to
+  open a bogus new `OPEN` ticket for a truck that was actually already
+  leaving.
+- **Rejected alternative: debounce by matching the same plate within a
+  short window.** Doesn't work here — the whole failure mode is that the
+  spurious read's plate is *not* the one already on file, so there is
+  nothing to match against. Only recency of the last release can catch it.
+- **Decision: a global, time-anchored debounce, not scoped by plate.**
+  `TicketRepository.findMostRecentExitAt()` (`tickets/repository.ts`)
+  returns the `exitAt` of the most recently closed ticket (any plate, any
+  closing path including an internal truck's tare-based close). Both
+  camera webhook handlers (`camera/routes.ts`) check this — after parsing
+  the ANPR payload (so the discarded event can still be logged with its
+  real plate/camera) but *before* `scaleClient.readStableWeight` and
+  `driverSignalAdapter.signalDriver` — and discard outright
+  (`{ kind: 'reading_debounced' }`, logged via `request.log.warn`, and a
+  `raw_events` row flagged `discarded: 'post_release_debounce'` but never
+  linked to a ticket) if the gap is under `CAMERA_POST_RELEASE_DEBOUNCE_MS`
+  (`camera/config.ts`, default 15000ms). This does not touch the existing
+  entrance last-write-wins retrigger rule above, which only concerns a
+  still-*open* ticket's own entrance leg.
+- **Known accepted risk, explicitly confirmed with the user (2026-11-03)**:
+  since the debounce is global (not per-plate), a *different*, legitimately
+  queued truck's real entrance could in principle land inside the same
+  15s window and be wrongly discarded too. The user acknowledged this is
+  possible during busy periods but chose to ship this as a live production
+  test and observe actual behavior rather than block on it — hence the
+  window being an env var from day one, and every discard being logged to
+  `raw_events` for later review. If this turns out to bite in practice,
+  the fix is to shorten the window or revisit — not to go back to
+  per-plate matching, which can't work for this fleet.
+- See `docs/plans/2026-11-03-camera-post-release-debounce-plan.md` for the
   full step-by-step record; delete that file once this entry is merged,
   per `CLAUDE.md`'s working-document convention.

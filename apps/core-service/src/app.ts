@@ -11,6 +11,7 @@ import type { DriverSignalAdapter } from './driver-signal/types.js';
 import type { PrintClient } from './printing/print-client.js';
 import { createPrintService } from './printing/print-service.js';
 import { registerCameraRoutes } from './camera/routes.js';
+import { loadCameraConfig } from './camera/config.js';
 import { registerPrintRoutes } from './printing/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
 
@@ -57,11 +58,16 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
+  const cameraConfig = loadCameraConfig();
+
   registerCameraRoutes(app, {
     sessionService,
     scaleClient: options.scaleClient,
     driverSignalAdapter: options.driverSignalAdapter,
     printService,
+    getMostRecentExitAt: () => repo.findMostRecentExitAt(),
+    postReleaseDebounceMs: cameraConfig.postReleaseDebounceMs,
+    recordRawEvent: (source, payload) => repo.recordRawEvent(source, payload),
   });
 
   registerPrintRoutes(app, { printService });

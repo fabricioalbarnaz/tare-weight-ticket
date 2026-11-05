@@ -3,14 +3,23 @@ import type { ScaleClient } from '../scale/types.js';
 import type { DriverSignalAdapter } from '../driver-signal/types.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { EntranceResult, ExitResult, SessionService } from '../tickets/session-service.js';
+import type { RawEventSource } from '../db/schema.js';
 import { parseAnprXml } from './anpr-xml.js';
-import { normalizeCameraPayload } from './normalize.js';
+import { normalizeCameraPayload, type NormalizedCameraEvent } from './normalize.js';
 
 export interface CameraRoutesOptions {
   sessionService: SessionService;
   scaleClient: ScaleClient;
   driverSignalAdapter: DriverSignalAdapter;
   printService: PrintService;
+  /**
+   * `exitAt` of the most recently closed ticket (any plate), or null if
+   * none has ever closed — see docs/plans/2026-11-03-camera-post-release-debounce-plan.md.
+   */
+  getMostRecentExitAt: () => Date | null;
+  /** How long after that to discard any camera webhook outright, regardless of which plate it reports. */
+  postReleaseDebounceMs: number;
+  recordRawEvent: (source: RawEventSource, rawPayload: unknown) => void;
 }
 
 const ANPR_XML_FIELD_NAME = 'anpr.xml';
@@ -44,6 +53,45 @@ async function readAnprXmlPart(request: FastifyRequest, reply: FastifyReply): Pr
   return xml;
 }
 
+/**
+ * Discards a camera reading that arrives too soon after the last ticket
+ * closed, regardless of which plate it reports — see
+ * docs/plans/2026-11-03-camera-post-release-debounce-plan.md. A released
+ * truck rolling back slightly can re-trigger either camera, which then
+ * reads the *other* plate of the same articulated rig (tractor vs.
+ * trailer), so matching on "same plate" can't catch this; only recency of
+ * the last release can. Returns true (and has already replied) when the
+ * reading was discarded.
+ */
+function checkPostReleaseDebounce(
+  options: CameraRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  direction: 'entrance' | 'exit',
+  event: NormalizedCameraEvent,
+  receivedAt: Date,
+): boolean {
+  const lastExitAt = options.getMostRecentExitAt();
+  if (lastExitAt === null) return false;
+
+  const msSinceLastExit = receivedAt.getTime() - lastExitAt.getTime();
+  if (msSinceLastExit < 0 || msSinceLastExit >= options.postReleaseDebounceMs) return false;
+
+  request.log.warn(
+    { plate: event.rawPlate, cameraId: event.cameraId, direction, msSinceLastExit },
+    `camera: ${direction} reading discarded — received ${msSinceLastExit}ms after the last ticket closed, inside the post-release debounce window (likely a truck rollback bounce; see docs/plans/2026-11-03-camera-post-release-debounce-plan.md)`,
+  );
+  options.recordRawEvent(direction === 'entrance' ? 'camera_entrance' : 'camera_exit', {
+    rawPlate: event.rawPlate,
+    cameraId: event.cameraId,
+    receivedAt,
+    discarded: 'post_release_debounce',
+    msSinceLastExit,
+  });
+  reply.send({ kind: 'reading_debounced' });
+  return true;
+}
+
 export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
   app.post('/webhooks/camera/entrance', async (request, reply) => {
     // Captured before the scale wait so entryAt reflects when the truck
@@ -64,6 +112,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
+    if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, receivedAt)) return;
+
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'entrance',
@@ -129,6 +179,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     }
 
     const event = normalizeCameraPayload(anprEvent);
+    if (checkPostReleaseDebounce(options, request, reply, 'exit', event, receivedAt)) return;
+
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'exit',

@@ -312,6 +312,80 @@ describe('POST /webhooks/camera/exit', () => {
   });
 });
 
+describe('post-release debounce', () => {
+  it('discards an exit reading that arrives right after a ticket closes, even for an unrelated plate', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'BOUNCE1' });
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    await postExit({ plate: 'BOUNCE1' });
+
+    driverSignalCalls = [];
+    printCalls = 0;
+
+    // Simulates the truck rolling back moments after release and
+    // re-triggering a camera, which reads the *other* plate of the same
+    // articulated rig (tractor vs. trailer) — must still be discarded.
+    const bounce = await postExit({ plate: 'TRAILER9' });
+
+    expect(bounce.json()).toEqual({ kind: 'reading_debounced' });
+    expect(driverSignalCalls).toEqual([]);
+    expect(printCalls).toBe(0);
+    expect(repo.findOpenByPlate('TRAILER9')).toBeUndefined();
+
+    const unresolved = repo.listUnresolvedEvents({});
+    const discarded = unresolved.items.find(
+      (e) => (JSON.parse(e.rawPayload) as { discarded?: string }).discarded === 'post_release_debounce',
+    );
+    expect(discarded).toBeDefined();
+  });
+
+  it('discards an entrance reading that arrives right after a ticket closes, even for an unrelated plate', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'BOUNCE2' });
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    await postExit({ plate: 'BOUNCE2' });
+
+    driverSignalCalls = [];
+
+    // Simulates the rollback reaching back far enough to re-trigger the
+    // entrance camera instead, again reading the rig's other plate.
+    const bounce = await postEntrance({ plate: 'TRACTOR5' });
+
+    expect(bounce.json()).toEqual({ kind: 'reading_debounced' });
+    expect(driverSignalCalls).toEqual([]);
+    expect(repo.findOpenByPlate('TRACTOR5')).toBeUndefined();
+  });
+
+  it('processes a reading normally once the debounce window has passed', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'BOUNCE3' });
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    const closed = await postExit({ plate: 'BOUNCE3' });
+
+    // Backdate the close past the debounce window instead of sleeping the
+    // test for real: the default window is 15s.
+    const ticket = repo.findById(closed.json().ticketId)!;
+    repo.correctExit(ticket.id, {
+      exitAt: new Date(Date.now() - 20000),
+      exitWeightKg: ticket.exitWeightKg,
+      exitCameraId: ticket.exitCameraId,
+      exitCaptureFailed: false,
+    });
+
+    nextScaleReading = { weightKg: 18000, weightCaptureFailed: false };
+    const response = await postEntrance({ plate: 'NEXTTRK' });
+
+    expect(response.json().kind).toBe('ticket_opened');
+    expect(driverSignalCalls).toContain('in');
+  });
+
+  it('never debounces when no ticket has ever closed', async () => {
+    const response = await postEntrance({ plate: 'FRESH01' });
+
+    expect(response.json().kind).toBe('ticket_opened');
+  });
+});
+
 describe('internal trucks (pre-registered tare)', () => {
   function registerTruckWithActiveTare(plate: string, tareWeightKg: number): void {
     const truck = truckRepo.createTruck({ plate, label: 'Test truck' });
