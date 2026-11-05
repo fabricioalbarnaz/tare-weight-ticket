@@ -1121,3 +1121,73 @@ merge per `CLAUDE.md`):
 - See `docs/plans/2026-11-03-camera-post-release-debounce-plan.md` for the
   full step-by-step record; delete that file once this entry is merged,
   per `CLAUDE.md`'s working-document convention.
+
+### Hikvision ISAPI driver-signal adapter (2026-11-04)
+
+- A second `DriverSignalAdapter` implementation,
+  `createHikvisionIsapiDriverSignalAdapter`
+  (`driver-signal/hikvision-isapi-adapter.ts`), alongside the existing
+  `http-relay-adapter.ts` — selected via `DRIVER_SIGNAL_ADAPTER` (default
+  `http-relay`, unchanged behavior unless opted in). It fires the
+  entrance/exit ANPR camera's own ISAPI generic I/O output trigger (`PUT
+  /ISAPI/System/IO/outputs/<ID>/trigger`, HTTP Digest auth via a new
+  `isapi-digest-auth.ts` helper) instead of requiring a standalone network
+  relay.
+- **Not a dedicated barrier-gate integration, on purpose.** Desk research
+  (`docs/runbooks/hikvision-tcg406-relay-findings.md`) found and confirmed
+  two dedicated, gate-aware ISAPI endpoints
+  (`Parking/channels/<id>/barrierGate`, `ITC/Entrance/barrierGateCtrl`) via
+  Hikvision's gated Technology Partner Portal guide — but the user then
+  clarified this install's camera relay actually drives an audible siren,
+  not a barrier gate. Those dedicated endpoints are scoped to a relay
+  channel assigned the gate-control function and don't apply to one
+  assigned `relayFunction: 4` ("alarm signal"), so the adapter uses the
+  generic, relay-function-agnostic trigger endpoint instead, sending
+  `outputState: high` then `low` to pulse the siren (`pulseMs`, default
+  1000ms) — same pulse pattern as the existing `http-relay-adapter.ts`.
+- **Explicitly not a production sign-off.** Not tested against a real
+  camera. On-site validation (Phase 7) must still confirm: the output
+  `<ID>` that corresponds to the physical relay channel wired to the
+  siren, that `entranceParam.relayList[].relayFunction` is actually set to
+  `4` on that channel, and that the trigger call audibly sounds the siren
+  — same caveat level already applied to the scale protocol above.
+- See `docs/plans/2026-10-31-hikvision-isapi-driver-signal-plan.md` for the
+  full step-by-step record; delete that file once this entry is merged,
+  per `CLAUDE.md`'s working-document convention.
+
+### Driver signal moved to after the ticket write, not before (2026-11-04)
+
+- **Rule**: in both camera webhook handlers (`camera/routes.ts`),
+  `driverSignalAdapter.signalDriver` is now called *after*
+  `sessionService.handleEntranceReading`/`handleExitReading` returns, not
+  before. Those two functions run their DB write inside one SQLite
+  transaction (master plan §11's "Implementation notes" intro) and are
+  synchronous, so by the time `signalDriver` is considered, the reading
+  is already durably committed.
+- **Why**: releasing a truck is irreversible — it can't be re-weighed once
+  it leaves the scale. Signaling before the write meant a DB failure (or
+  any exception from the transaction) could still release the truck with
+  nothing recorded, making that load unbillable with no way to reconstruct
+  it afterward. The user flagged this directly: "não podemos liberar o
+  motorista sem ter essa informação [peso] gravada com sucesso, isso pode
+  impedir o faturamento daquela carga."
+- **Side effect, strictly an improvement**: the withhold condition changed
+  from checking `event.rawPlate === ''` (the route's own pre-check) to
+  checking `result.kind === 'plate_unreadable'` (the session service's own
+  outcome). These were already equivalent for every reachable case today,
+  since `camera/normalize.ts` pre-filters low-confidence/wrong-length
+  plates down to `''` before the route ever sees them — but checking the
+  actual write outcome instead of duplicating that pre-check closes a
+  latent gap: `normalizePlate` (`domain/plate.ts`) strips non-alphanumeric
+  characters, so a hypothetical non-empty `rawPlate` that normalizes to
+  `''` inside the session service would previously have still signaled
+  the driver despite no ticket being created.
+- A DB write failure now surfaces as the request's own `500` (the
+  exception propagates out of the Fastify handler uncaught, same as any
+  other unexpected error here) and the driver is never signaled — covered
+  by a new test per handler in `camera/routes.test.ts` that closes the
+  SQLite connection mid-test to force the write to throw.
+- This is adapter-agnostic — it applies the same way regardless of
+  whether `DRIVER_SIGNAL_ADAPTER` is `http-relay` or `hikvision-isapi`
+  (above), since the reordering lives in the camera route, not either
+  adapter.

@@ -77,7 +77,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  sqlite.close();
+  // A couple of tests close `sqlite` themselves to simulate a DB write
+  // failure — tolerate the double-close here instead of erroring.
+  try {
+    sqlite.close();
+  } catch {
+    // already closed
+  }
   for (const suffix of ['', '-wal', '-shm']) {
     fs.rmSync(dbPath + suffix, { force: true });
   }
@@ -227,6 +233,19 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(driverSignalCalls).toEqual([]);
   });
 
+  it('does not signal the driver when the ticket write fails', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    // Forces repo.create/transaction to throw, simulating a DB write
+    // failure — the driver must never be released without a durably
+    // recorded reading (see the comment in camera/routes.ts).
+    sqlite.close();
+
+    const response = await postEntrance({ plate: 'DBFAIL1' });
+
+    expect(response.statusCode).toBe(500);
+    expect(driverSignalCalls).toEqual([]);
+  });
+
   it('rejects a request with no anpr.xml part', async () => {
     const { body, contentType } = await buildMultipartBody([
       { fieldName: 'somethingElse', content: 'irrelevant' },
@@ -309,6 +328,19 @@ describe('POST /webhooks/camera/exit', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ kind: 'plate_unreadable' });
     expect(driverSignalCalls).toEqual([]);
+  });
+
+  it('does not signal the driver when the ticket write fails', async () => {
+    nextScaleReading = { weightKg: 15000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'DBFAIL2' });
+
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    sqlite.close();
+
+    const response = await postExit({ plate: 'DBFAIL2' });
+
+    expect(response.statusCode).toBe(500);
+    expect(driverSignalCalls).toEqual(['in']);
   });
 });
 

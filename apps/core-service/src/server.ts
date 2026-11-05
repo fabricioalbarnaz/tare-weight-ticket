@@ -8,6 +8,7 @@ import { createDgnFrameParser } from './scale/dgn-frame-parser.js';
 import { createTcpScaleClient } from './scale/tcp-client.js';
 import { loadScaleConfig } from './scale/config.js';
 import { createHttpRelayDriverSignalAdapter } from './driver-signal/http-relay-adapter.js';
+import { createHikvisionIsapiDriverSignalAdapter } from './driver-signal/hikvision-isapi-adapter.js';
 import { loadDriverSignalConfig } from './driver-signal/config.js';
 import { createHttpPrintClient } from './printing/print-client.js';
 import { loadAdminConfig } from './admin/config.js';
@@ -59,12 +60,23 @@ const scaleClient = createTcpScaleClient({
 });
 
 const driverSignalConfig = loadDriverSignalConfig();
-const driverSignalAdapter = createHttpRelayDriverSignalAdapter({
-  entranceUrl: driverSignalConfig.entranceUrl,
-  exitUrl: driverSignalConfig.exitUrl,
-  timeoutMs: driverSignalConfig.timeoutMs,
-  onError: (err, direction) => console.error(`driver signal (${direction}) failed:`, err),
-});
+const driverSignalOnError = (err: Error, direction: string) =>
+  console.error(`driver signal (${direction}) failed:`, err);
+const driverSignalAdapter =
+  driverSignalConfig.adapter === 'hikvision-isapi'
+    ? createHikvisionIsapiDriverSignalAdapter({
+        entrance: driverSignalConfig.hikvisionEntrance,
+        exit: driverSignalConfig.hikvisionExit,
+        timeoutMs: driverSignalConfig.timeoutMs,
+        pulseMs: driverSignalConfig.hikvisionPulseMs,
+        onError: driverSignalOnError,
+      })
+    : createHttpRelayDriverSignalAdapter({
+        entranceUrl: driverSignalConfig.entranceUrl,
+        exitUrl: driverSignalConfig.exitUrl,
+        timeoutMs: driverSignalConfig.timeoutMs,
+        onError: driverSignalOnError,
+      });
 
 const printClient = createHttpPrintClient({ baseUrl: printBridgeUrl });
 

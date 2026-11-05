@@ -1,19 +1,30 @@
 # Hikvision DS-TCG406-E(S) — relay/barrier-gate control research findings
 
 Desk research sessions: **2026-10-23** (initial, forum-sourced candidates
-only) and **2026-10-31** (follow-up — found and read two actual Hikvision
-documents, see "Confirmed from official Hikvision documents" below). No
-physical camera available in either session.
+only), **2026-10-31** (follow-up — found and read two actual Hikvision
+documents, see "Confirmed from official Hikvision documents" below),
+**2026-11-04 morning** (the gated TPP partner guide cleared — see
+"Confirmed from the gated ISAPI_Vehicle Access Control Management_ANPR
+Cameras guide" below), and **2026-11-04 later the same day** (the user
+clarified the camera's relay is actually wired to an audible siren, not a
+barrier gate — see "Correction" section below, which changes the chosen
+endpoint back to the generic IO trigger). No physical camera available in
+any session yet.
 
 This document records what was found (and not found) about using the
 Hikvision DS-TCG406-E(S) ANPR camera to drive the driver "move on" signal
 (§4.5 of the master plan,
 `docs/plans/2026-09-29-tare-weight-ticket-plan.md`), as an alternative or
-addition to a separate network relay module (Shelly/Tasmota-style). Treat
-everything below as **unconfirmed against the real device** — no camera,
-no firmware version, and no vendor-restricted ISAPI developer manual were
-available during this session. Do not implement against the candidate
-endpoints below without first verifying them against the real unit.
+addition to a separate network relay module (Shelly/Tasmota-style). **This
+install's camera relay is wired to an audible siren, not a barrier gate**
+(confirmed 2026-11-04) — read the "Correction" section before the
+barrier-gate-specific sections below; they document real Hikvision APIs
+but the gate-specific ones (`barrierGate`, `barrierGateCtrl`) are the
+wrong tool for this install's actual wiring. Treat everything below as
+**unconfirmed against the real device** — no camera, no firmware version
+were available during any session. Do not implement against the
+candidate endpoints below without first verifying them against the real
+unit.
 
 ## Why this was investigated
 
@@ -161,6 +172,142 @@ Sources (this session):
 - [Intelligent ANPR Camera User Manual V5.4.4, 2025-09-23](https://enpinfo.hikvision.com/hkwsen/unzip/20250923194804_01508_doc/Intelligent%20ANPR%20Camera_User%20Manual_V5.4.4_20250923.pdf)
 - [Hikvision Technology Partner Portal — ISAPI/OTAP developer guides (gated)](https://tpp.hikvision.com/download/ISAPI_OTAP)
 
+## Confirmed from the gated ISAPI_Vehicle Access Control Management_ANPR Cameras guide (2026-11-04 session)
+
+The user's Hikvision TPP partner account cleared and they downloaded the
+gated, model-family-specific developer guide: **"ISAPI_Vehicle Access
+Control Management_ANPR Cameras"** (local copy under
+`ISAPI_Vehicle Access Control Management_ANPR Cameras/ISAPI_Vehicle
+Access Control Management_ANPR Cameras.pdf`, plus supporting
+`Access Control Event Types and Event Linkage Types.pdf`,
+`Field Dictionary.xlsx`, `ErrorCode.xlsx` — not itself in the repo, kept
+locally). This is the official ANPR/Entrance-specific guide referenced as
+still-pending in the 2026-10-31 session above, and it resolves the open
+question of whether a dedicated barrier-gate endpoint exists (it does —
+two, in fact) rather than only the generic `IO/outputs/<ID>/trigger`.
+
+**§10.2 "Entrance and Exit Barrier Control" — official API calling flow**:
+1. `GET /ISAPI/Traffic/capabilities` — check plate-list support.
+2. `GET /ISAPI/ITC/Entrance/capabilities` — check
+   `$.EntranceCap.supportEntrance` / `supportBarrierGateNum`.
+3. `GET /ISAPI/ITC/Entrance/entranceParam/capabilities`.
+4. `PUT /ISAPI/ITC/Entrance/entranceParam` — set
+   `$.EntranceParamList.EntranceParam.ctrlMode`: **`0` = camera control
+   (automatic), `1` = platform control (manual — our case), `2` = both**.
+   This same call's `relayList[].relayFunction` is where a physical relay
+   channel is assigned a function: `0`-none, `1`-open barrier gate,
+   `2`-close barrier gate, `3`-stop barrier gate, `4`-alarm signal,
+   `5`-solid light. This is the documented equivalent of the on-site "Relay
+   Function" web-UI step already noted above, now with the exact field
+   name/enum for doing it over ISAPI instead of the admin page.
+5. **Manual control**: `PUT /ISAPI/Parking/channels/<channelID>/barrierGate`.
+
+**§11.6.3 — `Parking/channels` barrier-gate endpoints (primary candidate,
+dedicated and gate-aware, not generic IO)**:
+
+| Method | Path | Body / notes |
+|---|---|---|
+| PUT | `/ISAPI/Parking/channels/<channelID>/barrierGate` | `<BarrierGate version="2.0"><ctrlMode opt="open,close,lock,unlock">open</ctrlMode></BarrierGate>` — one call, no separate high/low pulse needed |
+| GET | `/ISAPI/Parking/channels/<channelID>/barrierGate/barrierGateStatus` | returns `<barrierGateStatus>`: `0` no signal, `1` closed, `2` open |
+| GET | `/ISAPI/Parking/channels/<channelID>/barrierGate/capabilities` | returns supported `ctrlMode` values + `isSupportBarrierGateStatus` |
+
+**§11.6.4 — `ITC/Entrance/barrierGateCtrl` (alternate dedicated endpoint,
+same device family)**:
+
+| Method | Path | Body / notes |
+|---|---|---|
+| PUT | `/ISAPI/ITC/Entrance/barrierGateCtrl` | `<BarrierGateCtrl version="2.0"><BarrierGateCtrlList><barrietGateOper>on</barrietGateOper></BarrierGateCtrlList></BarrierGateCtrl>` (sic — `barrietGateOper`/`barrietGateNum` typos are in the vendor XML itself); `barrietGateOper` enum: `"off"`-fall, `"on"`-rise, `"stop"`, `"locked"` |
+| GET | `/ISAPI/ITC/Entrance/capabilities` | `supportEntrance`, `supportBarrierGateNum`, `supportAlarmINNum`, `supportRelayNum` |
+| GET/PUT | `/ISAPI/ITC/Entrance/entranceParam[/capabilities]` | the `ctrlMode`/`relayFunction` config from the flow above |
+
+**Still open**: the guide documents both `Parking/channels/.../barrierGate`
+and `ITC/Entrance/barrierGateCtrl` as separate, fully-specified endpoints
+on the same device family, but doesn't say which one (if not both) the
+DS-TCG406-E(S) web UI's own "Barrier Gate Remote Control" panel calls, or
+whether both are simultaneously supported on that exact model/firmware.
+`Parking/channels/.../barrierGate` is the simpler contract (single
+`ctrlMode` string, explicit status enum) and reads as the more
+general-purpose "parking facility" API; `ITC/Entrance/barrierGateCtrl` is
+named for the entrance/traffic-camera product line the TCG406 belongs to
+and exposes `off`/`on`/`stop`/`locked` instead. **Recommendation once a
+physical unit is available**: try `Parking/channels/.../barrierGate` first
+(simpler, has a real status read-back) and fall back to
+`ITC/Entrance/barrierGateCtrl` only if the first returns an error on this
+model. No further desk research planned — this needs the real device to
+resolve, per the "Recommended next step" section below (now narrowed from
+three options to just option 1, since options 2/3 are superseded by this
+guide).
+
+**Auth**: confirmed HTTP Digest against the camera's admin credentials
+(same as already assumed) — the guide's own request-examples chapter
+(§4.1.4) shows `requests.auth.HTTPDigestAuth('admin', 'admin12345')` in
+Python as the reference pattern.
+
+## Correction (2026-11-04, later update): the relay drives a siren, not a barrier gate
+
+The user clarified that **this install's camera relay output is wired to
+an audible siren** (sinal sonoro) for the driver "move on" signal, not to
+a physical barrier gate. This was not previously stated — all research
+above (the official ANPR user manual's §4.1 "Barrier Gate Linkage", and
+the gated guide's §10.2/§11.6 `barrierGate`/`barrierGateCtrl` endpoints)
+assumed the relay opened a gate, because that's the only use case the
+vendor documentation frames for this relay output.
+
+**Why this matters, not just terminology**: the dedicated endpoints found
+in the gated guide (`PUT /ISAPI/Parking/channels/<channelID>/barrierGate`
+and `PUT /ISAPI/ITC/Entrance/barrierGateCtrl`) are **gate-aware, not
+generic relay triggers**. Per §10.2.2 step 6/§11.6.3's own config model,
+they act on whichever relay channel has
+`entranceParam.relayList[].relayFunction` set to `1` ("open barrier
+gate")/`2`/`3` — a *different* value than what a siren needs. The same
+`relayFunction` enum documented in that guide (§11.6.4.1/§11.6.4.5) also
+includes `4` = **"alarm signal"**, which is the function this install's
+relay channel should actually be assigned on-site. There is no
+dedicated "fire the alarm signal relay" business endpoint in the gated
+ANPR/Vehicle-Access-Control guide — it only documents the gate-control
+APIs; a relay assigned function `4` is not addressable through
+`barrierGate`/`barrierGateCtrl` at all (those calls are scoped to the
+gate entity, not an arbitrary relay channel).
+
+**Net effect: this reverts the chosen endpoint back to the generic I/O
+output trigger** from the 2026-10-31 session's "Intelligent Security API
+(General Application) Developer Guide" finding, which is relay-channel-
+agnostic and works regardless of what the channel is wired to or which
+`relayFunction` it's assigned:
+
+```
+PUT /ISAPI/System/IO/outputs/<ID>/trigger
+<IOPortData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <outputState>high</outputState>
+</IOPortData>
+```
+Send `high` then `low` to pulse the siren on and back off (or configure
+`outputState: pulse` with a `pulseDuration` on the port itself, so a
+single `high` call is enough — same option noted in the 2026-10-31
+section above). This was searched for specifically in the newly-downloaded
+gated ANPR guide (terms: `audioAlarm`, `acousticAndLight`, `soundAlarm`,
+`siren`, `buzzer`) — no dedicated siren-trigger business endpoint exists
+in that guide; the closest hit, `/ISAPI/System/syncSignalOutput/<alarmOutID>`
+(§11.1.3), is for strobe/supplement-light synchronization
+(`flashLight`/`polarizer`/`continuousLight` modes), not an audible alarm,
+so it does not apply either.
+
+**On-site config step changes accordingly**: assign
+`relayFunction = 4` ("alarm signal") to the relay channel wired to the
+siren in `entranceParam` (via `PUT /ISAPI/ITC/Entrance/entranceParam` or
+the camera's own web UI), not `1` ("open barrier gate"). The `<ID>` used
+in the generic `IO/outputs/<ID>/trigger` call is still assumed (not yet
+confirmed) to correspond to the same physical relay channel numbering as
+`relayNum` in `entranceParam` — on-site verification must confirm this
+mapping along with everything else in this document.
+
+The gate-specific sections above (`Parking/channels/.../barrierGate`,
+`ITC/Entrance/barrierGateCtrl`, and the §10.2 `ctrlMode`/`relayFunction=1`
+flow) remain accurate documentation of those real Hikvision APIs — they're
+just not the ones this install needs, and are kept here in case a future
+install on this same system does use an actual barrier gate on this
+relay output.
+
 ## Not confirmed — candidate ISAPI endpoints (forum-sourced, unverified)
 
 The full ISAPI developer manual with endpoint-level detail is not publicly
@@ -189,9 +336,17 @@ this exact model/firmware:
    an official Hikvision integration guide for ITC (Intelligent Traffic
    Camera) / entrance-series devices, which TCG406 plausibly belongs to.
    One user following this got a "device error" response on their unit.
+   **Update 2026-11-04: now confirmed** against the official gated ANPR
+   guide — see "Confirmed from the gated ISAPI_Vehicle Access Control
+   Management_ANPR Cameras guide" above. The prior "device error" report
+   may have been a different firmware or a missing `entranceParam`
+   `ctrlMode=1` (platform control) setup step, not a wrong endpoint.
 3. **`PUT /ISAPI/Parking/channels/1/barrierGate`** with an XML body setting
    `ctrlMode` to `open` — reported as working by a different user, on a
    different device/firmware than (2). May be model/firmware-specific.
+   **Update 2026-11-04: now confirmed** against the same gated guide, with
+   full request/response schema (status enum, capabilities endpoint) — see
+   above. This is the recommended endpoint to try first.
 
 All three use HTTP Basic or Digest authentication against the camera's own
 admin credentials. None of this was tested against a real unit in this
@@ -203,28 +358,29 @@ Sources (community forums, not official — verify before trusting):
 
 ## Recommended next step before writing any code
 
-Three ways to get a fully confirmed endpoint, in order of preference:
+**Update 2026-11-04 (later update)**: per the "Correction" section above,
+this install's relay drives a siren, not a gate, so the gated guide's
+dedicated `barrierGate`/`barrierGateCtrl` endpoints don't apply. The
+gated-guide research itself is still done (options 2/3 from the original
+three-option list below are resolved, just not in the direction originally
+expected) — what's left is on-site verification of the generic I/O trigger
+path:
 
-1. **Once a physical unit is available** (still the most reliable, and now
-   a short task given the confirmed background above): configure
-   `Configuration > Capture > Entrance and Exit > Barrier Gate` with
-   Control Mode `By Platform` and a Relay Function assignment, then either
-   (a) just call `PUT /ISAPI/System/IO/outputs/<ID>/trigger` directly with
-   `outputState: high` and confirm the physical gate moves, which would be
-   sufficient to ship against — no further research needed; or (b), for
-   extra confidence, open the web admin UI's own "Barrier Gate Remote
-   Control" panel and capture the exact HTTP request its Open/Close
-   buttons issue (browser dev tools or a proxy), to see whether Hikvision
-   itself uses the generic IO trigger or a dedicated endpoint.
-2. Ask Hikvision support/distributor for the ISAPI developer manual
-   specifically for the **DS-TCG406-E(S)** model/firmware that will ship
-   (resolves the open question about a possible dedicated barrier-gate
-   endpoint, see above).
-3. Sign up for Hikvision's Technology Partner Portal
-   (`tpp.hikvision.com`) and request the gated ANPR/Entrance ISAPI
-   developer guide — confirmed to exist and be downloadable once a
-   partner account/license agreement is in place (not attempted this
-   session; requires a business decision, not just research).
+1. **Once a physical unit is available** (the only remaining step): assign
+   `relayFunction = 4` ("alarm signal") to the relay channel wired to the
+   siren — either via ISAPI (`PUT /ISAPI/ITC/Entrance/entranceParam`,
+   `relayList[].relayFunction: 4`) or the camera's own web UI equivalent.
+   Then call `PUT /ISAPI/System/IO/outputs/<ID>/trigger` with
+   `outputState: high` (for whichever `<ID>` corresponds to that relay
+   channel) and confirm the siren actually sounds; send `outputState: low`
+   afterwards (or pre-configure `pulse` mode on the port, per the
+   2026-10-31 finding above) to turn it back off.
+2. ~~Ask Hikvision support/distributor for the ISAPI developer manual~~ —
+   superseded, done via the TPP download instead (even though the
+   resulting gate-specific endpoints turned out not to be the ones needed
+   here).
+3. ~~Sign up for Hikvision's Technology Partner Portal~~ — done; guide
+   downloaded 2026-11-04.
 
 ## Impact on the current architecture if this pans out
 
