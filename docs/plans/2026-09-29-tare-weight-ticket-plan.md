@@ -1122,38 +1122,49 @@ merge per `CLAUDE.md`):
   full step-by-step record; delete that file once this entry is merged,
   per `CLAUDE.md`'s working-document convention.
 
-### Hikvision ISAPI driver-signal adapter (2026-11-04)
+### Hikvision ISAPI driver-signal adapter (2026-11-04, corrected same day after live testing)
 
 - A second `DriverSignalAdapter` implementation,
   `createHikvisionIsapiDriverSignalAdapter`
   (`driver-signal/hikvision-isapi-adapter.ts`), alongside the existing
   `http-relay-adapter.ts` — selected via `DRIVER_SIGNAL_ADAPTER` (default
-  `http-relay`, unchanged behavior unless opted in). It fires the
-  entrance/exit ANPR camera's own ISAPI generic I/O output trigger (`PUT
-  /ISAPI/System/IO/outputs/<ID>/trigger`, HTTP Digest auth via a new
-  `isapi-digest-auth.ts` helper) instead of requiring a standalone network
-  relay.
-- **Not a dedicated barrier-gate integration, on purpose.** Desk research
-  (`docs/runbooks/hikvision-tcg406-relay-findings.md`) found and confirmed
-  two dedicated, gate-aware ISAPI endpoints
-  (`Parking/channels/<id>/barrierGate`, `ITC/Entrance/barrierGateCtrl`) via
-  Hikvision's gated Technology Partner Portal guide — but the user then
-  clarified this install's camera relay actually drives an audible siren,
-  not a barrier gate. Those dedicated endpoints are scoped to a relay
-  channel assigned the gate-control function and don't apply to one
-  assigned `relayFunction: 4` ("alarm signal"), so the adapter uses the
-  generic, relay-function-agnostic trigger endpoint instead, sending
-  `outputState: high` then `low` to pulse the siren (`pulseMs`, default
-  1000ms) — same pulse pattern as the existing `http-relay-adapter.ts`.
-- **Explicitly not a production sign-off.** Not tested against a real
-  camera. On-site validation (Phase 7) must still confirm: the output
-  `<ID>` that corresponds to the physical relay channel wired to the
-  siren, that `entranceParam.relayList[].relayFunction` is actually set to
-  `4` on that channel, and that the trigger call audibly sounds the siren
-  — same caveat level already applied to the scale protocol above.
-- See `docs/plans/2026-10-31-hikvision-isapi-driver-signal-plan.md` for the
-  full step-by-step record; delete that file once this entry is merged,
-  per `CLAUDE.md`'s working-document convention.
+  `http-relay`, unchanged behavior unless opted in).
+- **Correction from the original same-day decision**: the adapter was
+  first implemented against the generic `PUT
+  /ISAPI/System/IO/outputs/<ID>/trigger` endpoint, on the assumption
+  (desk research only, see `docs/runbooks/hikvision-tcg406-relay-findings.md`)
+  that it was relay-channel-agnostic. Live testing against the real
+  cameras the same day found this assumption wrong: that endpoint only
+  exposes **one** output on this camera/firmware, and it's the camera's
+  own supplemental illuminator (`IOUseType: whiteLight`), not the
+  barrier/siren relay. The real relay channels
+  (`entranceParam.relayList`, 2 per camera) are a **separate registry**,
+  still assigned their gate-control defaults (`relayFunction=1`/`2`, not
+  the `4` "alarm signal" the original plan called for assigning) — and
+  the way to actually fire them over ISAPI is the dedicated
+  `PUT /ISAPI/Parking/channels/<channelId>/barrierGate` endpoint
+  (confirmed live, `HTTP 200` on both cameras, both channels), which the
+  original plan had marked out of scope on the (now-disproven) assumption
+  that it only applied to a gate-function relay.
+- The adapter now calls that dedicated endpoint with a configured
+  `ctrlMode` (default `open`, fires relay 1; `close` fires relay 2) —
+  HTTP Digest auth via the existing `isapi-digest-auth.ts` helper, one
+  call per signal (no high/low pulse pair — the camera's own
+  `relayOutTime`, 7000ms on both cameras here, auto-resets the contact).
+- **Explicitly still not a production sign-off.** IP/credentials/endpoint
+  are now confirmed live (entrance `192.168.29.66:222`, exit
+  `192.168.29.65:221`), but **which `ctrlMode`/relay channel actually
+  drives the siren is not** — all 4 combinations tested returned
+  `HTTP 200` with no reported audible result; the user could not fully
+  observe the siren during that test. Needs someone physically present
+  (multimeter on the relay contacts, confirm the siren's own power/wiring)
+  — tracked in `docs/plans/2026-11-04-hikvision-barriergate-endpoint-fix-plan.md`
+  step 2.
+- See `docs/plans/2026-10-31-hikvision-isapi-driver-signal-plan.md` (original
+  implementation) and `docs/plans/2026-11-04-hikvision-barriergate-endpoint-fix-plan.md`
+  (this correction) for the full step-by-step record; delete both once
+  step 2 above is done and merged, per `CLAUDE.md`'s working-document
+  convention.
 
 ### Driver signal moved to after the ticket write, not before (2026-11-04)
 

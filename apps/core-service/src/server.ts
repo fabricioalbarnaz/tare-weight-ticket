@@ -73,7 +73,6 @@ const driverSignalAdapter =
         entrance: driverSignalConfig.hikvisionEntrance,
         exit: driverSignalConfig.hikvisionExit,
         timeoutMs: driverSignalConfig.timeoutMs,
-        pulseMs: driverSignalConfig.hikvisionPulseMs,
         onError: driverSignalOnError,
       })
     : createHttpRelayDriverSignalAdapter({

@@ -10,7 +10,6 @@ describe('loadDriverSignalConfig', () => {
       timeoutMs: 3000,
       hikvisionEntrance: undefined,
       hikvisionExit: undefined,
-      hikvisionPulseMs: 1000,
     });
   });
 
@@ -28,7 +27,6 @@ describe('loadDriverSignalConfig', () => {
       timeoutMs: 1500,
       hikvisionEntrance: undefined,
       hikvisionExit: undefined,
-      hikvisionPulseMs: 1000,
     });
   });
 
@@ -59,55 +57,46 @@ describe('loadDriverSignalConfig', () => {
   });
 
   describe('hikvision camera config', () => {
-    it('loads a fully configured entrance camera', () => {
+    it('loads a fully configured entrance camera, defaulting channelId to "1" and ctrlMode to "open"', () => {
       const config = loadDriverSignalConfig({
         DRIVER_SIGNAL_HIKVISION_ENTRANCE_URL: 'http://192.168.1.10',
-        DRIVER_SIGNAL_HIKVISION_ENTRANCE_OUTPUT_ID: '1',
         DRIVER_SIGNAL_HIKVISION_ENTRANCE_USERNAME: 'admin',
         DRIVER_SIGNAL_HIKVISION_ENTRANCE_PASSWORD: 'admin12345',
       });
 
       expect(config.hikvisionEntrance).toEqual({
         baseUrl: 'http://192.168.1.10',
-        outputId: '1',
+        channelId: '1',
+        ctrlMode: 'open',
         username: 'admin',
         password: 'admin12345',
       });
       expect(config.hikvisionExit).toBeUndefined();
     });
 
-    it('loads a fully configured exit camera independently of the entrance camera', () => {
+    it('loads a fully configured exit camera independently of the entrance camera, with an explicit channel/ctrlMode', () => {
       const config = loadDriverSignalConfig({
         DRIVER_SIGNAL_HIKVISION_EXIT_URL: 'http://192.168.1.11',
-        DRIVER_SIGNAL_HIKVISION_EXIT_OUTPUT_ID: '2',
+        DRIVER_SIGNAL_HIKVISION_EXIT_CHANNEL_ID: '1',
+        DRIVER_SIGNAL_HIKVISION_EXIT_CTRL_MODE: 'close',
         DRIVER_SIGNAL_HIKVISION_EXIT_USERNAME: 'admin',
         DRIVER_SIGNAL_HIKVISION_EXIT_PASSWORD: 'admin12345',
       });
 
       expect(config.hikvisionExit).toEqual({
         baseUrl: 'http://192.168.1.11',
-        outputId: '2',
+        channelId: '1',
+        ctrlMode: 'close',
         username: 'admin',
         password: 'admin12345',
       });
       expect(config.hikvisionEntrance).toBeUndefined();
     });
 
-    it('throws when the camera URL is set but the output ID is missing', () => {
-      expect(() =>
-        loadDriverSignalConfig({
-          DRIVER_SIGNAL_HIKVISION_ENTRANCE_URL: 'http://192.168.1.10',
-          DRIVER_SIGNAL_HIKVISION_ENTRANCE_USERNAME: 'admin',
-          DRIVER_SIGNAL_HIKVISION_ENTRANCE_PASSWORD: 'admin12345',
-        }),
-      ).toThrow(/DRIVER_SIGNAL_HIKVISION_ENTRANCE_OUTPUT_ID/);
-    });
-
     it('throws when the camera URL is set but the username is missing', () => {
       expect(() =>
         loadDriverSignalConfig({
           DRIVER_SIGNAL_HIKVISION_ENTRANCE_URL: 'http://192.168.1.10',
-          DRIVER_SIGNAL_HIKVISION_ENTRANCE_OUTPUT_ID: '1',
           DRIVER_SIGNAL_HIKVISION_ENTRANCE_PASSWORD: 'admin12345',
         }),
       ).toThrow(/DRIVER_SIGNAL_HIKVISION_ENTRANCE_USERNAME/);
@@ -117,16 +106,20 @@ describe('loadDriverSignalConfig', () => {
       expect(() =>
         loadDriverSignalConfig({
           DRIVER_SIGNAL_HIKVISION_ENTRANCE_URL: 'http://192.168.1.10',
-          DRIVER_SIGNAL_HIKVISION_ENTRANCE_OUTPUT_ID: '1',
           DRIVER_SIGNAL_HIKVISION_ENTRANCE_USERNAME: 'admin',
         }),
       ).toThrow(/DRIVER_SIGNAL_HIKVISION_ENTRANCE_PASSWORD/);
     });
 
-    it('reads a custom pulse duration', () => {
-      expect(loadDriverSignalConfig({ DRIVER_SIGNAL_HIKVISION_PULSE_MS: '500' }).hikvisionPulseMs).toBe(
-        500,
-      );
+    it('throws when ctrlMode is not one of open/close/lock/unlock', () => {
+      expect(() =>
+        loadDriverSignalConfig({
+          DRIVER_SIGNAL_HIKVISION_ENTRANCE_URL: 'http://192.168.1.10',
+          DRIVER_SIGNAL_HIKVISION_ENTRANCE_USERNAME: 'admin',
+          DRIVER_SIGNAL_HIKVISION_ENTRANCE_PASSWORD: 'admin12345',
+          DRIVER_SIGNAL_HIKVISION_ENTRANCE_CTRL_MODE: 'open-sesame',
+        }),
+      ).toThrow(/DRIVER_SIGNAL_HIKVISION_ENTRANCE_CTRL_MODE/);
     });
   });
 });

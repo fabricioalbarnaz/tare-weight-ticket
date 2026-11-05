@@ -1,11 +1,15 @@
 import type { DriverSignalAdapter, DriverSignalDirection } from './types.js';
 import { digestAuthFetch } from './isapi-digest-auth.js';
 
+export type BarrierGateCtrlMode = 'open' | 'close' | 'lock' | 'unlock';
+
 export interface HikvisionIsapiCameraOptions {
   /** Base URL of the camera's ISAPI HTTP server, e.g. "http://192.168.1.10". */
   baseUrl: string;
-  /** Relay/output channel ID targeted by PUT /ISAPI/System/IO/outputs/<ID>/trigger. On-site wiring-dependent — see docs/runbooks/hikvision-tcg406-relay-findings.md. */
-  outputId: string;
+  /** Channel targeted by PUT /ISAPI/Parking/channels/<channelId>/barrierGate. Almost always "1" on a single-lane camera. */
+  channelId: string;
+  /** Which relay this fires: "open" drives relay 1, "close" drives relay 2 (per entranceParam.relayList) — on-site wiring-dependent, see docs/runbooks/hikvision-tcg406-relay-findings.md. */
+  ctrlMode: BarrierGateCtrlMode;
   username: string;
   password: string;
 }
@@ -16,39 +20,36 @@ export interface HikvisionIsapiDriverSignalOptions {
   /** Exit-lane camera config. Omit to disable (no-op) that direction. */
   exit?: HikvisionIsapiCameraOptions;
   timeoutMs?: number;
-  /** How long to hold the relay "high" before pulsing it back to "low". Defaults to 1000ms. */
-  pulseMs?: number;
   onError?: (err: Error, direction: DriverSignalDirection) => void;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
- * Driver-signal adapter that fires the camera's own ISAPI generic I/O
- * output trigger (PUT /ISAPI/System/IO/outputs/<ID>/trigger), used on
- * installs where the camera's relay drives an audible siren rather than a
- * barrier gate. See docs/runbooks/hikvision-tcg406-relay-findings.md and
- * docs/plans/2026-10-31-hikvision-isapi-driver-signal-plan.md for why this
- * endpoint was chosen over the camera's dedicated (gate-specific)
- * barrierGate/barrierGateCtrl endpoints. Not tested against a real unit —
- * the output `<ID>`-to-relay-channel mapping and the relay's
- * `relayFunction: 4` ("alarm signal") assignment are on-site configuration,
- * done once, out of scope for this adapter.
+ * Driver-signal adapter that fires the camera's dedicated
+ * PUT /ISAPI/Parking/channels/<channelId>/barrierGate endpoint, confirmed
+ * live against the real cameras (2026-11-04) to be the one that actually
+ * operates the relay — unlike the generic PUT /ISAPI/System/IO/outputs
+ * trigger this adapter used before that session, which turned out to
+ * target an unrelated supplemental-light output on this camera/firmware.
+ * See docs/runbooks/hikvision-tcg406-relay-findings.md and
+ * docs/plans/2026-11-04-hikvision-barriergate-endpoint-fix-plan.md.
+ *
+ * Which `ctrlMode` ("open" = relay 1, "close" = relay 2) actually drives
+ * the siren is still unconfirmed on-site (all 4 combinations returned
+ * HTTP 200 without an audible result in the one test session so far) —
+ * `ctrlMode` is configurable per direction for that reason, defaulting to
+ * "open".
  */
 export function createHikvisionIsapiDriverSignalAdapter(
   options: HikvisionIsapiDriverSignalOptions,
 ): DriverSignalAdapter {
   const timeoutMs = options.timeoutMs ?? 3000;
-  const pulseMs = options.pulseMs ?? 1000;
 
   let lastSuccessAt: Date | null = null;
   let lastFailureAt: Date | null = null;
 
-  async function setOutputState(camera: HikvisionIsapiCameraOptions, outputState: 'high' | 'low'): Promise<void> {
-    const url = `${camera.baseUrl.replace(/\/$/, '')}/ISAPI/System/IO/outputs/${camera.outputId}/trigger`;
-    const body = `<?xml version="1.0" encoding="UTF-8"?><IOPortData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><outputState>${outputState}</outputState></IOPortData>`;
+  async function fireBarrierGate(camera: HikvisionIsapiCameraOptions): Promise<void> {
+    const url = `${camera.baseUrl.replace(/\/$/, '')}/ISAPI/Parking/channels/${camera.channelId}/barrierGate`;
+    const body = `<?xml version="1.0" encoding="UTF-8"?><BarrierGate version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><ctrlMode>${camera.ctrlMode}</ctrlMode></BarrierGate>`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -64,7 +65,7 @@ export function createHikvisionIsapiDriverSignalAdapter(
         { username: camera.username, password: camera.password },
       );
       if (!response.ok) {
-        throw new Error(`Camera responded with HTTP ${response.status} setting outputState=${outputState}`);
+        throw new Error(`Camera responded with HTTP ${response.status} setting ctrlMode=${camera.ctrlMode}`);
       }
     } finally {
       clearTimeout(timer);
@@ -75,9 +76,7 @@ export function createHikvisionIsapiDriverSignalAdapter(
     if (!camera) return;
 
     try {
-      await setOutputState(camera, 'high');
-      await delay(pulseMs);
-      await setOutputState(camera, 'low');
+      await fireBarrierGate(camera);
       lastSuccessAt = new Date();
     } catch (err) {
       lastFailureAt = new Date();

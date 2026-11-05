@@ -382,6 +382,60 @@ path:
 3. ~~Sign up for Hikvision's Technology Partner Portal~~ — done; guide
    downloaded 2026-11-04.
 
+## Live test against the real cameras (2026-11-04, same day as the correction above)
+
+Both cameras confirmed reachable: entrance `192.168.29.66:222`, exit
+`192.168.29.65:221`, admin credentials working (HTTP Digest, MD5,
+`qop=auth` — exactly the challenge format `isapi-digest-auth.ts` expects).
+This produced two concrete corrections to everything assumed above:
+
+1. **The chosen generic endpoint (`PUT /ISAPI/System/IO/outputs/<ID>/trigger`)
+   targets the wrong physical output on this camera/firmware.**
+   `GET /ISAPI/System/IO/outputs/capabilities` shows exactly **one**
+   generic output (`id=1`, name `"test"`/`"F1"`), whose `IOUseType` only
+   accepts `disable`/`whiteLight` — this is the camera's own supplemental
+   illuminator, not the barrier/siren relay. Requesting `id=2` returns
+   `notSupport` (`HTTP 403`). This generic endpoint and the
+   barrier/siren relay are **separate registries** on this device — the
+   "relay-channel-agnostic" assumption in the "Correction" section above
+   does not hold.
+2. **The real relay channels, and their current assignment**:
+   `GET /ISAPI/ITC/Entrance/entranceParam`'s `relayList` on *both*
+   cameras shows `relayNum=1` → `relayFunction=1` ("open barrier gate"),
+   `relayNum=2` → `relayFunction=2` ("close barrier gate").
+   **`relayFunction=4` ("alarm signal") was never actually assigned** —
+   both cameras are still at what looks like a factory/gate-control
+   default. `supportRelayNum=2`, `supportBarrierGateNum=1` per
+   `GET /ISAPI/ITC/Entrance/capabilities`.
+3. **The dedicated `PUT /ISAPI/Parking/channels/1/barrierGate` endpoint
+   works on this camera/firmware** — `capabilities`
+   (`ctrlMode opt="open,close,lock,unlock"`) and `barrierGateStatus`
+   (`0` = no signal) both read back cleanly, and firing
+   `ctrlMode=open`/`close` both returned `HTTP 200`/`OK` on both cameras.
+   Since the channels are still assigned `relayFunction=1`/`2`
+   (open/close), this dedicated endpoint is in fact the one that operates
+   them — regardless of what's physically wired to the output contacts.
+   This reverses the "out of scope" call in the 2026-10-31 plan, which
+   assumed these endpoints didn't apply because the channel would be
+   assigned `relayFunction=4`.
+4. **Audible result: inconclusive.** All 4 combinations tested — entrance
+   channel 1 (`open`), entrance channel 2 (`close`, fired twice), exit
+   channel 1 (`open`), exit channel 2 (`close`) — returned `HTTP 200`
+   with no reported siren sound. The user could not fully observe/hear
+   the siren from where they were during the test. This needs someone
+   physically present at the install, ideally with a multimeter on the
+   relay contacts (1A/1B, 2A/2B) to confirm the relay itself closes when
+   commanded (isolating a camera-side problem from a wiring/power problem
+   on the siren side), plus confirming the siren has its own power and is
+   actually landed on these terminals.
+
+**Adapter updated accordingly** (`hikvision-isapi-adapter.ts`): now calls
+`PUT /ISAPI/Parking/channels/<channelId>/barrierGate` with a configured
+`ctrlMode` (default `open`) instead of the generic `IO/outputs` trigger.
+See `docs/plans/2026-11-04-hikvision-barriergate-endpoint-fix-plan.md`.
+**Still not production-validated** — step 2 of that plan (on-site audible
+confirmation) is the remaining blocker.
+
 ## Impact on the current architecture if this pans out
 
 No structural change — this still slots into the existing pluggable

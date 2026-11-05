@@ -70,54 +70,48 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 }
 
 describe('createHikvisionIsapiDriverSignalAdapter', () => {
-  it('sends outputState high then low, authenticated, to the entrance camera output', async () => {
-    const trigger: Array<{ url: string; outputState: string }> = [];
+  it('sends ctrlMode=open to the entrance camera barrierGate endpoint, authenticated', async () => {
+    const requests: Array<{ url: string; ctrlMode: string }> = [];
     const baseUrl = await startServer((req, res) => {
       if (!isAuthorized(req)) {
         challenge(res);
         return;
       }
       readBody(req).then((raw) => {
-        const outputState = /<outputState>(\w+)<\/outputState>/.exec(raw)?.[1] ?? '';
-        trigger.push({ url: req.url ?? '', outputState });
+        const ctrlMode = /<ctrlMode>(\w+)<\/ctrlMode>/.exec(raw)?.[1] ?? '';
+        requests.push({ url: req.url ?? '', ctrlMode });
         res.writeHead(200).end();
       });
     });
 
     const adapter = createHikvisionIsapiDriverSignalAdapter({
-      entrance: { baseUrl, outputId: '1', username: USERNAME, password: PASSWORD },
-      pulseMs: 5,
+      entrance: { baseUrl, channelId: '1', ctrlMode: 'open', username: USERNAME, password: PASSWORD },
     });
 
     await adapter.signalDriver('in');
 
-    expect(trigger).toEqual([
-      { url: '/ISAPI/System/IO/outputs/1/trigger', outputState: 'high' },
-      { url: '/ISAPI/System/IO/outputs/1/trigger', outputState: 'low' },
-    ]);
+    expect(requests).toEqual([{ url: '/ISAPI/Parking/channels/1/barrierGate', ctrlMode: 'open' }]);
     expect(adapter.getStatus().lastSuccessAt).toBeInstanceOf(Date);
   });
 
-  it('targets the exit camera output for direction "out"', async () => {
-    const trigger: Array<{ url: string }> = [];
+  it('targets the exit camera channel/ctrlMode for direction "out"', async () => {
+    const requests: Array<{ url: string }> = [];
     const baseUrl = await startServer((req, res) => {
       if (!isAuthorized(req)) {
         challenge(res);
         return;
       }
-      trigger.push({ url: req.url ?? '' });
+      requests.push({ url: req.url ?? '' });
       res.writeHead(200).end();
     });
 
     const adapter = createHikvisionIsapiDriverSignalAdapter({
-      exit: { baseUrl, outputId: '2', username: USERNAME, password: PASSWORD },
-      pulseMs: 5,
+      exit: { baseUrl, channelId: '1', ctrlMode: 'close', username: USERNAME, password: PASSWORD },
     });
 
     await adapter.signalDriver('out');
 
-    expect(trigger.every((t) => t.url === '/ISAPI/System/IO/outputs/2/trigger')).toBe(true);
-    expect(trigger.length).toBe(2);
+    expect(requests).toEqual([{ url: '/ISAPI/Parking/channels/1/barrierGate' }]);
   });
 
   it('does nothing when the direction has no configured camera', async () => {
@@ -128,7 +122,7 @@ describe('createHikvisionIsapiDriverSignalAdapter', () => {
     });
 
     const adapter = createHikvisionIsapiDriverSignalAdapter({
-      exit: { baseUrl, outputId: '1', username: USERNAME, password: PASSWORD },
+      exit: { baseUrl, channelId: '1', ctrlMode: 'open', username: USERNAME, password: PASSWORD },
     });
 
     await adapter.signalDriver('in');
@@ -147,14 +141,13 @@ describe('createHikvisionIsapiDriverSignalAdapter', () => {
 
     const errors: Array<{ message: string; direction: string }> = [];
     const adapter = createHikvisionIsapiDriverSignalAdapter({
-      entrance: { baseUrl, outputId: '1', username: USERNAME, password: PASSWORD },
-      pulseMs: 5,
+      entrance: { baseUrl, channelId: '1', ctrlMode: 'open', username: USERNAME, password: PASSWORD },
       onError: (err, direction) => errors.push({ message: err.message, direction }),
     });
 
     await expect(adapter.signalDriver('in')).resolves.toBeUndefined();
     expect(errors).toEqual([
-      { message: 'Camera responded with HTTP 500 setting outputState=high', direction: 'in' },
+      { message: 'Camera responded with HTTP 500 setting ctrlMode=open', direction: 'in' },
     ]);
     expect(adapter.getStatus().lastFailureAt).toBeInstanceOf(Date);
   });
@@ -166,9 +159,8 @@ describe('createHikvisionIsapiDriverSignalAdapter', () => {
 
     const errors: Error[] = [];
     const adapter = createHikvisionIsapiDriverSignalAdapter({
-      entrance: { baseUrl, outputId: '1', username: USERNAME, password: PASSWORD },
+      entrance: { baseUrl, channelId: '1', ctrlMode: 'open', username: USERNAME, password: PASSWORD },
       timeoutMs: 50,
-      pulseMs: 5,
       onError: (err) => errors.push(err),
     });
 
