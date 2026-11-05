@@ -32,7 +32,11 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin${path}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    // Only set this when there's a body: Fastify's default JSON parser
+    // rejects a request with Content-Type: application/json and an empty
+    // body (FST_ERR_CTP_EMPTY_JSON_BODY), which bodyless POSTs like
+    // activate/logout always are.
+    headers: init?.body ? { 'Content-Type': 'application/json' } : {},
     ...init,
   });
 

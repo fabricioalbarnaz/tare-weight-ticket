@@ -1191,3 +1191,60 @@ merge per `CLAUDE.md`):
   whether `DRIVER_SIGNAL_ADAPTER` is `http-relay` or `hikvision-isapi`
   (above), since the reordering lives in the camera route, not either
   adapter.
+
+### Admin UI "Ativar" (activate conjunto) silently failing — empty-JSON-body bug (2026-11-03/04)
+
+- **Found while**: user reported being unable to activate a conjunto
+  assignment on an internal truck from the Admin UI — clicking "Ativar"
+  did nothing, with no visible error. First pass only fixed the symptom:
+  `TruckDetailPage.tsx`'s `activateMutation` had no `onError`/`isError`
+  handling at all (unlike `AssignConjuntoForm`, which already showed
+  mutation errors), so any failure of this call was swallowed silently.
+  Added error display + an `activateError` i18n key and a regression test
+  for that — necessary, but it only turned a silent failure into a visible
+  one; it did not explain *why* the call was failing.
+- **Root cause, found after the error became visible**: `apps/admin-ui/src/api/client.ts`'s
+  generic `request()` helper unconditionally set `Content-Type:
+  application/json` on every call, including the two bodyless `POST`s
+  (`activateTruckConjunto`, `logout`). Fastify's default JSON body parser
+  rejects that combination outright — `Content-Type: application/json`
+  with an empty body — with `400 FST_ERR_CTP_EMPTY_JSON_BODY`. This bug is
+  as old as the conjunto feature itself (PR #6, `c606193`): the "Ativar"
+  button had never worked, in any version, for any truck. `POST
+  /auth/logout` had the identical defect the whole time, confirmed with
+  the same reproduction.
+- **Why the test suite never caught it**: `admin/routes.test.ts` drives
+  every request through Fastify's `app.inject()`, which — unlike a real
+  `fetch()` — never adds a `Content-Type` header unless the test
+  explicitly sets one. None of the existing `activate`/`logout` test cases
+  did, so they never exercised the exact header/body combination the real
+  browser client sends.
+- **Confirmed directly against the running server**: `curl -X POST
+  .../truck-conjuntos/:id/activate -H 'Content-Type: application/json'`
+  (no body) → `400`; the same call without that header → `200`. Same
+  400-vs-200 split reproduced on `/auth/logout`.
+- **Fix, two parts**:
+  1. `client.ts`'s `request()` now only sets `Content-Type:
+     application/json` when `init.body` is actually present.
+  2. `app.ts` additionally registers a custom `application/json`
+     content-type parser that treats an empty body as `undefined` instead
+     of throwing — defense in depth so a future bodyless endpoint added
+     without remembering this quirk doesn't regress the same way.
+  `admin/routes.test.ts` gained a case that sends `content-type:
+  application/json` with no payload to `/truck-conjuntos/:id/activate`,
+  mirroring the real browser request shape (fails without fix #2, passes
+  with it).
+- **Verified**: `lint`/`typecheck`/`build` and both test suites (257
+  `core-service` + 22 `admin-ui`) green; rebuilt and redeployed the Docker
+  image; re-confirmed live against the running container with the exact
+  browser-shaped request (`Content-Type` header set, empty body) for both
+  `/activate` (now `200`) and `/logout` (now `204`).
+- **Unrelated but found in the same session, worth cross-referencing**:
+  the production container being redeployed here turned out to still be
+  running the pre-`journal_mode=DELETE` image from before the 2026-10-31
+  WAL incident fix above — i.e. that fix had been merged to `main` for
+  days but never actually redeployed. The redeploy for *this* bug therefore
+  had to go through the same live-data-safety procedure (Admin API export
+  + raw file backup before touching the container) described in that
+  section, and is what surfaced the gap between "merged" and "actually
+  running in production" in the first place.

@@ -43,6 +43,23 @@ export interface BuildAppOptions {
 export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app = options.logger ? Fastify({ loggerInstance: options.logger }) : Fastify({ logger: true });
 
+  // Fastify's default JSON parser 400s on Content-Type: application/json
+  // with an empty body (FST_ERR_CTP_EMPTY_JSON_BODY) — the admin-ui fetch
+  // client sent that combination on every bodyless POST (activate,
+  // logout), so every such call failed even though no route here actually
+  // requires a body for them. Treat an empty body as "no body" instead.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+    if (body === '') {
+      done(null, undefined);
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   const truckRepo = createTruckRepository(options.db);
   const ticketEvents = createTicketEvents();
   const repo = createTicketRepository(options.db, ticketEvents);

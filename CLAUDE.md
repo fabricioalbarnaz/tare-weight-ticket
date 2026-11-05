@@ -127,6 +127,26 @@ that someday used a Docker named volume or a non-Windows host for this
 file would not have hit this and could reasonably re-enable WAL for its
 better write concurrency. See master plan §11 for more detail.
 
+**Bug & fix (2026-11-03/04): the Admin UI's "Ativar" (activate conjunto)
+button never worked, for any truck, in any version — and the test suite
+couldn't catch why.** A user report of the button silently doing nothing
+led first to adding error display to the (previously silent) mutation,
+which then surfaced the real cause: `apps/admin-ui/src/api/client.ts`'s
+`request()` helper always sent `Content-Type: application/json`, even on
+bodyless `POST`s (`activateTruckConjunto`, `logout`) — Fastify 400s on
+that exact combination (`FST_ERR_CTP_EMPTY_JSON_BODY`), and
+`admin/routes.test.ts` never caught it because `app.inject()` doesn't add
+that header unless a test explicitly sets one. Fixed in two places:
+`client.ts` now only sets that header when there's an actual body, and
+`app.ts` registers a custom `application/json` content-type parser that
+tolerates an empty body instead of throwing, as defense in depth for any
+future bodyless endpoint. While redeploying this fix, also discovered the
+running production container was still on the pre-`journal_mode=DELETE`
+image from *before* the incident above — i.e. that fix had been merged to
+`main` for days but never actually redeployed — so this redeploy went
+through the same live-data-safety procedure (Admin API export + raw file
+backup first) described above. See master plan §11 for the full writeup.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

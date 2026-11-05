@@ -600,6 +600,27 @@ describe('Internal trucks / conjuntos', () => {
     ]);
   });
 
+  it('activates a conjunto assignment when the client sends Content-Type: application/json with no body (as the real admin-ui fetch client does)', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0007');
+
+    const assignment = await app.inject({
+      method: 'POST',
+      url: `/api/admin/trucks/${truckId}/conjuntos`,
+      headers: { cookie },
+      payload: { conjuntoName: 'C', tareWeightKg: 9000 },
+    });
+    const assignmentId = assignment.json().truck.conjuntos[0].id;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/truck-conjuntos/${assignmentId}/activate`,
+      headers: { cookie, 'content-type': 'application/json' },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
   it('returns 404 when activating a conjunto assignment that does not exist', async () => {
     const cookie = await loginCookie();
     const response = await app.inject({
