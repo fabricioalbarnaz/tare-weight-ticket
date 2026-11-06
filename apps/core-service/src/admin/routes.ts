@@ -7,6 +7,7 @@ import type { PrintService } from '../printing/print-service.js';
 import type { ScaleClient } from '../scale/types.js';
 import type { TicketRepository } from '../tickets/repository.js';
 import type { TicketEvents } from '../tickets/ticket-events.js';
+import type { WeighingEvents } from '../camera/weighing-events.js';
 import type { TruckRepository } from '../trucks/repository.js';
 import { createAdminAuthService } from './auth-service.js';
 import { getHardwareStatus } from './hardware-status.js';
@@ -58,6 +59,7 @@ export interface AdminRoutesOptions {
   /** Must be at least 32 characters (enforced by `admin/config.ts`'s `loadAdminConfig`). */
   sessionSecret: string;
   ticketEvents: TicketEvents;
+  weighingEvents: WeighingEvents;
 }
 
 /** How often the SSE ticket stream writes a comment-only keepalive line, so idle LAN connections/proxies don't time it out. */
@@ -335,6 +337,20 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         };
         options.ticketEvents.onChanged(sendChanged);
 
+        // Narrates each reading live for the Operação screen's weighing
+        // panel — see docs/plans/2026-11-05-operator-live-weighing-panel.md.
+        // Unlike `ticket-changed` above, these two carry an actual payload.
+        const sendPlateReceived = (event: Parameters<typeof options.weighingEvents.emitPlateReceived>[0]) => {
+          reply.raw.write(`event: weighing-plate-received\ndata: ${JSON.stringify(event)}\n\n`);
+        };
+        options.weighingEvents.onPlateReceived(sendPlateReceived);
+
+        const sendWeighingResult = (event: Parameters<typeof options.weighingEvents.emitWeighingResult>[0]) => {
+          const payload = { ...event, ticket: event.ticket ? serializeTicket(event.ticket) : undefined };
+          reply.raw.write(`event: weighing-result\ndata: ${JSON.stringify(payload)}\n\n`);
+        };
+        options.weighingEvents.onWeighingResult(sendWeighingResult);
+
         const heartbeat = setInterval(() => {
           reply.raw.write(':ping\n\n');
         }, STREAM_HEARTBEAT_MS);
@@ -342,6 +358,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         request.raw.on('close', () => {
           clearInterval(heartbeat);
           options.ticketEvents.offChanged(sendChanged);
+          options.weighingEvents.offPlateReceived(sendPlateReceived);
+          options.weighingEvents.offWeighingResult(sendWeighingResult);
           reply.raw.end();
         });
       });

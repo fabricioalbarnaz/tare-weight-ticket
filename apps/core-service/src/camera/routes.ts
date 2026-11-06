@@ -6,6 +6,7 @@ import type { EntranceResult, ExitResult, SessionService } from '../tickets/sess
 import type { RawEventSource } from '../db/schema.js';
 import { parseAnprXml } from './anpr-xml.js';
 import { normalizeCameraPayload, type NormalizedCameraEvent } from './normalize.js';
+import type { WeighingEvents } from './weighing-events.js';
 
 export interface CameraRoutesOptions {
   sessionService: SessionService;
@@ -20,6 +21,8 @@ export interface CameraRoutesOptions {
   /** How long after that to discard any camera webhook outright, regardless of which plate it reports. */
   postReleaseDebounceMs: number;
   recordRawEvent: (source: RawEventSource, rawPayload: unknown) => void;
+  /** Narrates each reading for the Admin UI's live weighing panel — see docs/plans/2026-11-05-operator-live-weighing-panel.md. */
+  weighingEvents: WeighingEvents;
 }
 
 const ANPR_XML_FIELD_NAME = 'anpr.xml';
@@ -116,6 +119,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, triggeredAt)) return;
 
+    options.weighingEvents.emitPlateReceived({ direction: 'entrance', rawPlate: event.rawPlate });
+
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'entrance',
@@ -136,6 +141,16 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       failureReason,
       waitedMs,
       attemptsUsed,
+    });
+
+    options.weighingEvents.emitWeighingResult({
+      direction: 'entrance',
+      rawPlate: event.rawPlate,
+      weightKg,
+      weightCaptureFailed,
+      failureReason,
+      outcome: result.kind,
+      ticket: 'ticket' in result ? result.ticket : undefined,
     });
 
     // Signaled only after handleEntranceReading above has returned — i.e.
@@ -196,6 +211,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'exit', event, triggeredAt)) return;
 
+    options.weighingEvents.emitPlateReceived({ direction: 'exit', rawPlate: event.rawPlate });
+
     const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'exit',
@@ -214,6 +231,16 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       failureReason,
       waitedMs,
       attemptsUsed,
+    });
+
+    options.weighingEvents.emitWeighingResult({
+      direction: 'exit',
+      rawPlate: event.rawPlate,
+      weightKg,
+      weightCaptureFailed,
+      failureReason,
+      outcome: result.kind,
+      ticket: 'ticket' in result ? result.ticket : undefined,
     });
 
     // See the matching comment in the entrance handler — signaled only

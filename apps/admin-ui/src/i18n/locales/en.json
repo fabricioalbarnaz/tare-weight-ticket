@@ -44,7 +44,27 @@
   "operation": {
     "title": "Truck records",
     "loadingTickets": "Loading tickets…",
-    "loadError": "Could not load tickets."
+    "loadError": "Could not load tickets.",
+    "panel": {
+      "idle": "Waiting for the next weighing…",
+      "directionLabel": "Direction",
+      "plateLabel": "Weighing plate:",
+      "weightLabel": "Weight",
+      "readingSr": "Reading weight…",
+      "doneSr": "Reading complete",
+      "alertSr": "Needs attention",
+      "direction": {
+        "entrance": "Entrance",
+        "exit": "Exit"
+      },
+      "alerts": {
+        "plateUnreadable": "Plate not recognized ({{direction}}) — driver signal withheld, truck held for manual intervention",
+        "entryCaptureFailed": "Entry weight capture failed for {{plate}} — truck held for manual correction",
+        "exitCaptureFailed": "Exit weight capture failed for {{plate}} — ticket stays open, pending manual correction",
+        "anomaly": "Exit with no matching open ticket for {{plate}} — flagged as an anomaly",
+        "closedNeedsAttention": "Closed without a confirmed weight on one leg — needs a manual check"
+      }
+    }
   },
   "history": {
     "title": "Ticket history",

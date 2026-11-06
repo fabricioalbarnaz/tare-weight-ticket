@@ -44,7 +44,27 @@
   "operation": {
     "title": "Registros de caminhões",
     "loadingTickets": "Carregando tickets…",
-    "loadError": "Não foi possível carregar os tickets."
+    "loadError": "Não foi possível carregar os tickets.",
+    "panel": {
+      "idle": "Aguardando a próxima pesagem…",
+      "directionLabel": "Direção",
+      "plateLabel": "Placa pesando:",
+      "weightLabel": "Peso",
+      "readingSr": "Lendo peso…",
+      "doneSr": "Leitura concluída",
+      "alertSr": "Requer atenção",
+      "direction": {
+        "entrance": "Entrada",
+        "exit": "Saída"
+      },
+      "alerts": {
+        "plateUnreadable": "Placa não identificada ({{direction}}) — sinal ao motorista retido, caminhão retido para intervenção manual",
+        "entryCaptureFailed": "Falha ao capturar o peso de entrada de {{plate}} — caminhão retido para correção manual",
+        "exitCaptureFailed": "Falha ao capturar o peso de saída de {{plate}} — ticket permanece aberto, aguardando correção manual",
+        "anomaly": "Saída sem ticket de entrada correspondente para {{plate}} — marcado como anomalia",
+        "closedNeedsAttention": "Fechado sem peso confirmado em uma das pernas — requer verificação manual"
+      }
+    }
   },
   "history": {
     "title": "Histórico de tickets",

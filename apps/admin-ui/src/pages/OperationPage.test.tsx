@@ -58,6 +58,15 @@ describe('OperationPage', () => {
     expect(screen.queryByRole('button', { name: /new ticket/i })).not.toBeInTheDocument();
   });
 
+  // Full behavior (plate received → reading → result, closing/tare/alert
+  // rendering, auto-clear) is covered in LiveWeighingPanel.test.tsx — just
+  // a smoke check here that it's actually mounted on this page.
+  it('renders the live weighing panel', async () => {
+    await goToOperationPage();
+
+    expect(await screen.findByText(/waiting for the next weighing/i)).toBeInTheDocument();
+  });
+
   it('refetches the listing when the server pushes a ticket-changed event', async () => {
     await goToOperationPage();
 
@@ -65,8 +74,11 @@ describe('OperationPage', () => {
       expect(screen.getByText('ABC1234')).toBeInTheDocument();
     });
 
-    const source = FakeEventSource.instances.find((instance) => instance.url.includes('/tickets/stream'));
-    expect(source).toBeDefined();
+    // Both `useTicketEvents` (this page) and the live weighing panel's own
+    // hook open a connection to the same URL — broadcast to every one of
+    // them rather than assuming there's only one.
+    const streams = FakeEventSource.instances.filter((instance) => instance.url.includes('/tickets/stream'));
+    expect(streams.length).toBeGreaterThan(0);
 
     store.tickets.push({
       id: 999,
@@ -88,7 +100,7 @@ describe('OperationPage', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    source!.emit('ticket-changed');
+    for (const stream of streams) stream.emit('ticket-changed');
 
     await waitFor(() => {
       expect(screen.getByText('NEW0001')).toBeInTheDocument();

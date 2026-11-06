@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useTicketEvents } from '../lib/useTicketEvents';
 import { TicketFilters, type TicketFiltersValue } from '../components/tickets/TicketFilters';
 import { TicketTable } from '../components/tickets/TicketTable';
+import { LiveWeighingPanel } from '../components/operation/LiveWeighingPanel';
 
 function startOfTodayIso(): string {
   const date = new Date();
@@ -39,6 +40,8 @@ export function OperationPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-900">{t('operation.title')}</h1>
       </div>
+
+      <LiveWeighingPanel />
 
       <TicketFilters value={filters} onChange={setFilters} />
 
