@@ -1,6 +1,19 @@
 # Fix Hikvision driver-signal adapter: switch to the `barrierGate` endpoint
 
-**Status: step 1 done, awaiting user review before any further step.**
+**Status: step 1 done. Step 2 not started. Adapter temporarily disabled
+(2026-11-05) pending step 2 — see note below.**
+
+## Temporarily disabled (2026-11-05)
+
+The siren trigger was never confirmed to actually sound on-site (step 2
+below) and had been running live in production since 2026-11-04 on an
+unconfirmed relay/ctrlMode mapping. Per the user's request, `.env`'s
+`DRIVER_SIGNAL_ADAPTER` was reverted from `hikvision-isapi` to `http-relay`
+(2026-11-05) — which is a no-op here since no relay URLs are configured —
+and `core-service` was restarted to apply it. The Hikvision config
+(`DRIVER_SIGNAL_HIKVISION_*` vars) was left in place in `.env`, unused,
+for when step 2 happens. No driver "move on" signal fires on entrance or
+exit until this is re-enabled.
 
 ## Background
 
