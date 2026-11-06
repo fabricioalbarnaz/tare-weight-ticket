@@ -162,3 +162,13 @@ So `core-service` comes back up after a reboot with no one logged in:
   that is one successful run on one PC, not production sign-off. See the
   serial runbook's still-open validation checklist (cold boot, reboot,
   vendor spec) before treating any install as fully validated.
+- **Company logo on the printed ticket (added 2026-11-05) — check the
+  physical print, not just the file-transport mock**: the logo bitmap is
+  generated offline at a fixed 384px width (see master plan §11 "Company
+  logo added to the printed ticket"), a conservative guess never validated
+  against the installed POS80's actual confirmed print width in dots. On
+  first physical print, confirm the logo isn't cropped/too small and isn't
+  wider than the paper; if it looks wrong, re-run
+  `npm run generate-logo-bitmap --workspace=@tare/print-bridge` with a
+  different target width (and check
+  `apps/print-bridge/assets/fida-logo-preview.png` before reprinting).

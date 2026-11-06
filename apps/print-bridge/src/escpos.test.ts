@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PrintTicketRequest } from '@tare/shared';
 import { buildTicketEscPos } from './escpos.js';
+import { LOGO_BITMAP_ESCPOS } from './logo-bitmap.generated.js';
 
 const baseTicket: PrintTicketRequest = {
   ticketId: 1,
@@ -19,6 +20,17 @@ describe('buildTicketEscPos', () => {
 
     expect(bytes.subarray(0, 2)).toEqual(Buffer.from([0x1b, 0x40]));
     expect(bytes.subarray(-3)).toEqual(Buffer.from([0x1d, 0x56, 0x00]));
+  });
+
+  it('prints the company logo bitmap right after initializing, before the title', () => {
+    const bytes = buildTicketEscPos(baseTicket);
+    const text = bytes.toString('latin1');
+
+    const logoAt = bytes.indexOf(LOGO_BITMAP_ESCPOS);
+    const titleAt = text.indexOf('TICKET DE PESAGEM');
+
+    expect(logoAt).toBeGreaterThan(0);
+    expect(logoAt).toBeLessThan(titleAt);
   });
 
   it('includes the plate, ticket number, and weights as readable text', () => {

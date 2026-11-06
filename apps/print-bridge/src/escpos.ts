@@ -1,4 +1,5 @@
 import type { PrintTicketRequest } from '@tare/shared';
+import { LOGO_BITMAP_ESCPOS } from './logo-bitmap.generated.js';
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -65,11 +66,15 @@ function formatWeight(weightKg: number | null): string {
 
 /**
  * Renders the ticket fields from master plan §2 ("Plate, entry date/time,
- * exit date/time, entry weight, exit weight, net weight difference —
- * nothing else") into raw ESC/POS bytes. Hand-rolled rather than a
- * thermal-printer library, matching this project's existing
- * dependency-light hardware integrations (scale TCP client, camera
- * payload normalization). Labels are in Portuguese (pt-BR) per the
+ * exit date/time, entry weight, exit weight, net weight difference") plus
+ * the contracting company's logo (master plan §2 update, 2026-11-05) into
+ * raw ESC/POS bytes. Hand-rolled rather than a thermal-printer library,
+ * matching this project's existing dependency-light hardware integrations
+ * (scale TCP client, camera payload normalization) — the one exception is
+ * the logo bitmap itself, which is pre-converted to packed ESC/POS raster
+ * bytes offline by `scripts/generate-logo-bitmap.mjs` and imported as a
+ * generated module (`logo-bitmap.generated.ts`), so no image-processing
+ * dependency ships at runtime. Labels are in Portuguese (pt-BR) per the
  * operator-facing ticket; the Admin UI's own pt-BR/en i18n is unrelated —
  * the printed ticket has one fixed language.
  */
@@ -77,6 +82,8 @@ export function buildTicketEscPos(ticket: PrintTicketRequest): Buffer {
   return Buffer.concat([
     initialize(),
     setAlign('center'),
+    LOGO_BITMAP_ESCPOS,
+    textLine(''),
     setCharSize(CHAR_SIZE_DOUBLE),
     setBold(true),
     textLine('TICKET DE PESAGEM'),

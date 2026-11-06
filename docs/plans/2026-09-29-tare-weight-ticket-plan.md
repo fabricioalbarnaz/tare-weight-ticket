@@ -38,7 +38,7 @@ a larger platform — optimize for simplicity and reliability, not scale-out.
 | Connectivity | Balance PC **has internet access** (not a hard offline requirement, but system must not depend on it for core flow) |
 | Admin UI access | Local web app, reachable from **other PCs on the same LAN**, not just the balance PC itself |
 | Duplicate/misread handling | A misread/unreadable plate can **only** be fixed by an admin. A **re-trigger of the same open entrance** replaces the record with the most recent reading (last-write-wins for the entrance leg only) |
-| Ticket fields | Plate, entry date/time, exit date/time, entry weight, exit weight, net weight difference — nothing else |
+| Ticket fields | Plate, entry date/time, exit date/time, entry weight, exit weight, net weight difference, plus the contracting company's logo (header graphic) — **updated 2026-11-05**, see §11; originally "nothing else" before the logo was requested |
 | Central reporting | Not needed now. Each balance stays independent, but design should leave room for a **future** central admin UI aggregating multiple balances (not built in this phase) |
 | Backend stack | Node.js / TypeScript (stakeholder preference) |
 
@@ -1285,3 +1285,47 @@ merge per `CLAUDE.md`):
 - See `docs/plans/2026-11-04-ticket-timestamp-from-weighing-plan.md` for
   the step-by-step change (deleted once merged, per the working-document
   convention).
+
+### Company logo added to the printed ticket (2026-11-05)
+
+- **Scope decision reversed**: §2's "Ticket fields... nothing else" is no
+  longer literal — the contracting company (FIDA) asked for their logo on
+  the printed ticket, so a header graphic is now part of the ticket
+  content.
+- **Approach**: ESC/POS prints raster images via the `GS v 0` command (a
+  packed 1-bit bitmap: width in bytes, height in pixels, then the pixel
+  data, MSB-first per row). Converting an arbitrary color source image to
+  that format at runtime would need an image-processing dependency
+  running inside `print-bridge`, a native Windows process meant to stay
+  dependency-light (same reasoning as preferring `bcryptjs` over `bcrypt`
+  elsewhere) — and the logo essentially never changes. So the conversion
+  happens **once, offline**: `apps/print-bridge/scripts/generate-logo-bitmap.mjs`
+  (uses `jimp`, a pure-JS image library, as a devDependency of that
+  workspace only) reads `assets/fida-logo-source.jpeg`, resizes it to a
+  fixed width, applies a luminance threshold to get a 1-bit image, packs
+  it into the `GS v 0` command bytes, and writes the result (base64-encoded)
+  into a **generated, checked-in** module, `apps/print-bridge/src/logo-bitmap.generated.ts`.
+  `escpos.ts` imports that module and concatenates it as-is, right after
+  `initialize()`/centering and before the title — no image processing (and
+  no `jimp`) at print time. Re-run the script manually
+  (`npm run generate-logo-bitmap --workspace=@tare/print-bridge`) whenever
+  the logo image changes; it also writes
+  `apps/print-bridge/assets/fida-logo-preview.png` so the 1-bit conversion
+  can be eyeballed before committing.
+- **Unconfirmed-on-site assumption, same pattern as the scale protocol
+  before vendor confirmation**: the bitmap is generated at a fixed width
+  of 384px (48 bytes) — conservative enough to fit both 58mm and 80mm
+  printers at typical 203dpi, but the installed POS80's actual confirmed
+  usable print width in dots has never been validated against the real
+  hardware. Added to the on-site validation checklist in
+  `docs/runbooks/per-pc-deployment.md`; if it prints narrower/cut off than
+  expected, re-run the generator with a different target width.
+- **Threshold tuned by eye**: `LUMINANCE_THRESHOLD = 170` in the generator
+  was picked by inspecting `fida-logo-preview.png` against this specific
+  logo's colors (green ring/text, gold outline, white background) — not a
+  generic value, re-check the preview if the source logo changes.
+- **Test coverage**: `escpos.test.ts` asserts the generated bitmap's exact
+  bytes appear in the output buffer, after the initialize command and
+  before the title text — not just "some bytes were added."
+- See `docs/plans/2026-11-05-ticket-logo-plan.md` for the step-by-step
+  change (delete once merged, per the working-document convention).
