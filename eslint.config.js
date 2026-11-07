@@ -21,6 +21,12 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ['**/scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     files: ['apps/admin-ui/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.browser,
