@@ -2,12 +2,14 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { createDb, type Db } from '../db/client.js';
 import { seedAdminUser } from '../db/seed-admin.js';
 import { createTicketRepository, type Ticket, type TicketRepository } from '../tickets/repository.js';
+import { createUserRepository, type AdminUser, type UserRepository } from '../users/repository.js';
 import type { ScaleClient, ScaleStatus } from '../scale/types.js';
 import type { DriverSignalAdapter, DriverSignalStatus } from '../driver-signal/types.js';
 import type { PrintClient } from '../printing/print-client.js';
@@ -16,6 +18,7 @@ let dbPath: string;
 let sqlite: ReturnType<typeof createDb>['sqlite'];
 let db: Db;
 let repo: TicketRepository;
+let userRepo: UserRepository;
 let app: FastifyInstance;
 let printTicketResult: { success: boolean; error?: string };
 let printCalls: number;
@@ -61,6 +64,7 @@ beforeEach(() => {
   db = created.db;
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
+  userRepo = createUserRepository(db);
   printTicketResult = { success: true };
   printCalls = 0;
   scaleStatus = { connected: false, lastSeenAt: null };
@@ -82,14 +86,29 @@ afterEach(() => {
   }
 });
 
-async function loginCookie(): Promise<string> {
+async function loginCookie(username = 'admin', password = 'correct-password'): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/api/admin/auth/login',
-    payload: { username: 'admin', password: 'correct-password' },
+    payload: { username, password },
   });
   const cookie = response.cookies[0];
   return `${cookie!.name}=${cookie!.value}`;
+}
+
+/** Creates a user directly (bypassing the API), already past the forced password change unless asked otherwise. */
+function createUser(
+  username: string,
+  role: 'admin' | 'operator',
+  options: { mustChangePassword?: boolean } = {},
+): AdminUser {
+  return userRepo.createUser({
+    username,
+    name: `Name ${username}`,
+    role,
+    passwordHash: bcrypt.hashSync('user-password', 4),
+    mustChangePassword: options.mustChangePassword ?? false,
+  });
 }
 
 function createOpenTicket(plate: string): Ticket {
@@ -127,7 +146,13 @@ describe('auth', () => {
 
     const me = await app.inject({ method: 'GET', url: '/api/admin/auth/me', headers: { cookie } });
     expect(me.statusCode).toBe(200);
-    expect(me.json()).toEqual({ username: 'admin' });
+    expect(me.json()).toEqual({
+      id: expect.any(Number),
+      username: 'admin',
+      name: 'admin',
+      role: 'admin',
+      mustChangePassword: false,
+    });
 
     const logout = await app.inject({ method: 'POST', url: '/api/admin/auth/logout', headers: { cookie } });
     expect(logout.statusCode).toBe(204);
@@ -743,5 +768,381 @@ describe('Internal trucks / conjuntos', () => {
       headers: { cookie },
     });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('profiles and session revalidation', () => {
+  it('rejects login for an inactive user', async () => {
+    const user = createUser('inactive', 'operator');
+    userRepo.setActive(user.id, false);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'inactive', password: 'user-password' },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('ends an already-open session as soon as the user is deactivated', async () => {
+    const user = createUser('soon-inactive', 'operator');
+    const cookie = await loginCookie('soon-inactive', 'user-password');
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } }))
+        .statusCode,
+    ).toBe(200);
+
+    userRepo.setActive(user.id, false);
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } }))
+        .statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/auth/me', headers: { cookie } }))
+        .statusCode,
+    ).toBe(401);
+  });
+
+  it('lets an operator list tickets but rejects admin-only routes with 403', async () => {
+    createUser('op', 'operator');
+    const cookie = await loginCookie('op', 'user-password');
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } }))
+        .statusCode,
+    ).toBe(200);
+    for (const url of [
+      '/api/admin/status',
+      '/api/admin/trucks',
+      '/api/admin/unresolved-events',
+      '/api/admin/users',
+    ]) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie } });
+      expect(response.statusCode, url).toBe(403);
+      expect(response.body).toBe('admin_required');
+    }
+    const create = await app.inject({
+      method: 'POST',
+      url: '/api/admin/tickets',
+      headers: { cookie },
+      payload: {
+        plate: 'ABC1234',
+        entryAt: '2026-01-01T08:00:00.000Z',
+        entryWeightKg: 20000,
+        reason: 'x',
+      },
+    });
+    expect(create.statusCode).toBe(403);
+  });
+
+  it('applies a profile change to an already-open session immediately', async () => {
+    const user = createUser('promoted', 'operator');
+    const cookie = await loginCookie('promoted', 'user-password');
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/trucks', headers: { cookie } }))
+        .statusCode,
+    ).toBe(403);
+
+    userRepo.updateUser(user.id, { name: user.name, role: 'admin' });
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/trucks', headers: { cookie } }))
+        .statusCode,
+    ).toBe(200);
+  });
+
+  it('blocks everything but me/logout/change-password until an admin-set password is changed', async () => {
+    createUser('fresh', 'admin', { mustChangePassword: true });
+    const cookie = await loginCookie('fresh', 'user-password');
+
+    const me = await app.inject({ method: 'GET', url: '/api/admin/auth/me', headers: { cookie } });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().mustChangePassword).toBe(true);
+
+    const tickets = await app.inject({
+      method: 'GET',
+      url: '/api/admin/tickets',
+      headers: { cookie },
+    });
+    expect(tickets.statusCode).toBe(403);
+    expect(tickets.body).toBe('password_change_required');
+
+    const change = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/change-password',
+      headers: { cookie },
+      payload: { currentPassword: 'user-password', newPassword: 'my-own-password' },
+    });
+    expect(change.statusCode).toBe(200);
+    expect(change.json().mustChangePassword).toBe(false);
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } }))
+        .statusCode,
+    ).toBe(200);
+  });
+});
+
+describe('POST /api/admin/auth/change-password', () => {
+  async function changePassword(cookie: string, currentPassword: string, newPassword: string) {
+    return app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/change-password',
+      headers: { cookie },
+      payload: { currentPassword, newPassword },
+    });
+  }
+
+  it('changes the password so only the new one logs in', async () => {
+    const cookie = await loginCookie();
+    expect((await changePassword(cookie, 'correct-password', 'brand-new')).statusCode).toBe(200);
+
+    const oldLogin = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'admin', password: 'correct-password' },
+    });
+    expect(oldLogin.statusCode).toBe(401);
+    const newLogin = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'admin', password: 'brand-new' },
+    });
+    expect(newLogin.statusCode).toBe(200);
+  });
+
+  it('rejects a wrong current password', async () => {
+    const cookie = await loginCookie();
+    const response = await changePassword(cookie, 'not-it', 'brand-new');
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe('wrong_current_password');
+  });
+
+  it('rejects a new password equal to the current one', async () => {
+    const cookie = await loginCookie();
+    const response = await changePassword(cookie, 'correct-password', 'correct-password');
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe('same_password');
+  });
+
+  it('rejects a new password shorter than 6 characters', async () => {
+    const cookie = await loginCookie();
+    expect((await changePassword(cookie, 'correct-password', '12345')).statusCode).toBe(400);
+  });
+
+  it('requires a session', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/change-password',
+      payload: { currentPassword: 'a', newPassword: 'abcdef' },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+});
+
+describe('user management', () => {
+  function adminId(): number {
+    return userRepo.findUserByUsername('admin')!.id;
+  }
+
+  it('lists users without password hashes', async () => {
+    const cookie = await loginCookie();
+    createUser('op', 'operator');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/admin/users',
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    const users: Array<Record<string, unknown>> = response.json();
+    expect(users.map((u) => u.username).sort()).toEqual(['admin', 'op']);
+    expect(users.every((u) => !('passwordHash' in u))).toBe(true);
+  });
+
+  it('creates a user who must change the admin-set password on first login', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/users',
+      headers: { cookie },
+      payload: { username: 'maria.op', name: '  Maria  ', role: 'operator', password: 'initial1' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().user).toMatchObject({
+      username: 'maria.op',
+      name: 'Maria',
+      role: 'operator',
+      active: true,
+      mustChangePassword: true,
+    });
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'maria.op', password: 'initial1' },
+    });
+    expect(login.json().mustChangePassword).toBe(true);
+  });
+
+  it('rejects a duplicate username with 409', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/users',
+      headers: { cookie },
+      payload: { username: 'admin', name: 'Other', role: 'operator', password: 'initial1' },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toBe('username_taken');
+  });
+
+  it('rejects an invalid username, a blank name, a short password and an unknown profile with 400', async () => {
+    const cookie = await loginCookie();
+    for (const payload of [
+      { username: 'a b', name: 'X', role: 'operator', password: 'initial1' },
+      { username: 'ab', name: 'X', role: 'operator', password: 'initial1' },
+      { username: 'valid', name: '   ', role: 'operator', password: 'initial1' },
+      { username: 'valid', name: 'X', role: 'operator', password: '12345' },
+      { username: 'valid', name: 'X', role: 'superuser', password: 'initial1' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/admin/users',
+        headers: { cookie },
+        payload,
+      });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(400);
+    }
+  });
+
+  it('edits name and profile of another user', async () => {
+    const cookie = await loginCookie();
+    const op = createUser('op', 'operator');
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${op.id}`,
+      headers: { cookie },
+      payload: { name: 'Novo Nome', role: 'admin' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user).toMatchObject({
+      name: 'Novo Nome',
+      role: 'admin',
+      username: 'op',
+    });
+  });
+
+  it('lets an admin rename themselves but not change their own profile', async () => {
+    const cookie = await loginCookie();
+
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${adminId()}`,
+      headers: { cookie },
+      payload: { name: 'Administrador', role: 'admin' },
+    });
+    expect(rename.statusCode).toBe(200);
+
+    const demote = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${adminId()}`,
+      headers: { cookie },
+      payload: { name: 'Administrador', role: 'operator' },
+    });
+    expect(demote.statusCode).toBe(400);
+    expect(demote.body).toBe('cannot_change_own_role');
+  });
+
+  it('returns 404 for an unknown user', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/admin/users/999999',
+      headers: { cookie },
+      payload: { name: 'X', role: 'admin' },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("resets another user's password and forces them to change it", async () => {
+    const cookie = await loginCookie();
+    const op = createUser('op', 'operator');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${op.id}/reset-password`,
+      headers: { cookie },
+      payload: { password: 'reset-pass' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.mustChangePassword).toBe(true);
+
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'op', password: 'reset-pass' },
+    });
+    expect(login.statusCode).toBe(200);
+  });
+
+  it('rejects resetting your own password (use change-password instead)', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${adminId()}/reset-password`,
+      headers: { cookie },
+      payload: { password: 'reset-pass' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe('cannot_reset_own_password');
+  });
+
+  it('deactivates and reactivates another user', async () => {
+    const cookie = await loginCookie();
+    const op = createUser('op', 'operator');
+
+    const off = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${op.id}/deactivate`,
+      headers: { cookie },
+    });
+    expect(off.statusCode).toBe(200);
+    expect(off.json().user.active).toBe(false);
+
+    const on = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${op.id}/activate`,
+      headers: { cookie },
+    });
+    expect(on.statusCode).toBe(200);
+    expect(on.json().user.active).toBe(true);
+  });
+
+  it('rejects deactivating yourself', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${adminId()}/deactivate`,
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe('cannot_deactivate_self');
+  });
+
+  it('lets an admin deactivate another admin while at least one active admin remains', async () => {
+    const cookie = await loginCookie();
+    const other = createUser('other-admin', 'admin');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${other.id}/deactivate`,
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(userRepo.countActiveAdmins()).toBe(1);
   });
 });

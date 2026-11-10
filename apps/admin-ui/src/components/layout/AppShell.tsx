@@ -1,16 +1,18 @@
 import { useTranslation } from 'react-i18next';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { HardwareStatusBadge } from './HardwareStatusBadge';
 
+/** `adminOnly` links are hidden for the operator profile — the routes themselves are guarded by `RequireAdmin`. */
 const NAV_LINKS = [
-  { to: '/', labelKey: 'nav.dashboard' },
-  { to: '/operation', labelKey: 'nav.operation' },
-  { to: '/history', labelKey: 'nav.history' },
-  { to: '/unresolved-events', labelKey: 'nav.unresolvedEvents' },
-  { to: '/internal-trucks', labelKey: 'nav.internalTrucks' },
-  { to: '/status', labelKey: 'nav.hardwareStatus' },
+  { to: '/', labelKey: 'nav.dashboard', adminOnly: true },
+  { to: '/operation', labelKey: 'nav.operation', adminOnly: false },
+  { to: '/history', labelKey: 'nav.history', adminOnly: true },
+  { to: '/unresolved-events', labelKey: 'nav.unresolvedEvents', adminOnly: true },
+  { to: '/internal-trucks', labelKey: 'nav.internalTrucks', adminOnly: true },
+  { to: '/status', labelKey: 'nav.hardwareStatus', adminOnly: true },
+  { to: '/users', labelKey: 'nav.users', adminOnly: true },
 ] as const;
 
 function linkClass(isActive: boolean) {
@@ -22,6 +24,7 @@ function linkClass(isActive: boolean) {
 export function AppShell() {
   const { t } = useTranslation();
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -30,7 +33,7 @@ export function AppShell() {
           <div className="flex items-center gap-6">
             <span className="text-lg font-semibold text-slate-900">{t('nav.appName')}</span>
             <nav className="flex gap-1">
-              {NAV_LINKS.map((link) => (
+              {NAV_LINKS.filter((link) => isAdmin || !link.adminOnly).map((link) => (
                 <NavLink
                   key={link.to}
                   to={link.to}
@@ -44,8 +47,15 @@ export function AppShell() {
           </div>
           <div className="flex items-center gap-4">
             <LanguageSwitcher />
-            <HardwareStatusBadge />
-            <span className="text-sm text-slate-500">{user?.username}</span>
+            {/* `GET /status` is admin-only. */}
+            {isAdmin && <HardwareStatusBadge />}
+            <Link
+              to="/account/password"
+              title={t('nav.changePassword')}
+              className="text-sm text-slate-500 hover:underline"
+            >
+              {user?.name}
+            </Link>
             <button
               type="button"
               onClick={logout}

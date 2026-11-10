@@ -50,11 +50,26 @@ export const rawEvents = sqliteTable('raw_events', {
   linkedTicketId: integer('linked_ticket_id').references(() => tickets.id),
 });
 
+export const USER_ROLES = ['admin', 'operator'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Every Admin UI login, not just admins (the table name predates the
+ * operator profile — see master plan §11, user management). `username` is
+ * immutable once created: it's the `actor` written to the audit logs.
+ * Users are deactivated (`active: false`), never deleted.
+ */
 export const adminUsers = sqliteTable('admin_users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   username: text('username').notNull().unique(),
+  name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
+  role: text('role', { enum: USER_ROLES }).notNull().default('admin'),
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  /** Set whenever an admin sets this user's password (creation/reset); cleared once the user picks their own. */
+  mustChangePassword: integer('must_change_password', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 });
 
 /**

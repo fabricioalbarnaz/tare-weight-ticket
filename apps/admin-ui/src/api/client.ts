@@ -1,9 +1,11 @@
 import type {
   AssignConjuntoPayload,
+  ChangePasswordPayload,
   Conjunto,
   CreateConjuntoPayload,
   CreateTicketPayload,
   CreateTruckPayload,
+  CreateUserPayload,
   CurrentUser,
   EditEntryPayload,
   EditExitPayload,
@@ -13,11 +15,14 @@ import type {
   Paginated,
   RawEvent,
   ReprintPayload,
+  ResetPasswordPayload,
   Ticket,
   TicketDetail,
   TicketListQuery,
   Truck,
   TruckDetail,
+  UpdateUserPayload,
+  User,
 } from './types';
 
 export class ApiError extends Error {
@@ -143,5 +148,32 @@ export const api = {
 
   activateTruckConjunto(truckConjuntoId: number): Promise<{ truck: Truck }> {
     return request(`/truck-conjuntos/${truckConjuntoId}/activate`, { method: 'POST' });
+  },
+
+  changePassword(payload: ChangePasswordPayload): Promise<CurrentUser> {
+    return request('/auth/change-password', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  listUsers(): Promise<User[]> {
+    return request('/users');
+  },
+
+  createUser(payload: CreateUserPayload): Promise<{ user: User }> {
+    return request('/users', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  updateUser(id: number, payload: UpdateUserPayload): Promise<{ user: User }> {
+    return request(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  },
+
+  resetUserPassword(id: number, payload: ResetPasswordPayload): Promise<{ user: User }> {
+    return request(`/users/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  setUserActive(id: number, active: boolean): Promise<{ user: User }> {
+    return request(`/users/${id}/${active ? 'activate' : 'deactivate'}`, { method: 'POST' });
   },
 };

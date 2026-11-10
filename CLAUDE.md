@@ -147,6 +147,16 @@ image from *before* the incident above — i.e. that fix had been merged to
 through the same live-data-safety procedure (Admin API export + raw file
 backup first) described above. See master plan §11 for the full writeup.
 
+**User management (2026-11-09):** the Admin UI now has two profiles,
+`admin` and `operator`. An operator can only use the Operação screen, and
+this is enforced server-side by a `requireAdmin` preHandler, not just by
+hiding links. A "Usuários" screen lets admins create, edit, reset the
+password of, and deactivate users, and every user can change their own
+password. Admin-set passwords must be changed on the next login. The
+session keeps only the user id and re-reads the user on every request, so
+deactivation applies immediately. `db:seed-admin` remains the
+locked-out-install recovery path. See master plan §11 "User management".
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

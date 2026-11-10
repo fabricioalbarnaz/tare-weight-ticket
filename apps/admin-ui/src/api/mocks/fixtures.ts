@@ -1,13 +1,13 @@
 import type {
   AuditLogEntry,
   Conjunto,
-  CurrentUser,
   HardwareStatus,
   RawEvent,
   Ticket,
   Truck,
   TruckAuditLogEntry,
   TruckConjunto,
+  User,
 } from '../types';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -17,6 +17,14 @@ function hoursAgo(hours: number): string {
 }
 
 export const MOCK_CREDENTIALS = { username: 'admin', password: 'admin123' };
+export const MOCK_OPERATOR_CREDENTIALS = { username: 'operador', password: 'operador123' };
+/** A user whose password was just set by an admin, so login lands on the forced change-password page. */
+export const MOCK_PENDING_CREDENTIALS = { username: 'novo', password: 'temp123' };
+
+/** A mock-only user row: the real API never returns passwords, but the mock login has to check one. */
+export interface MockUser extends User {
+  password: string;
+}
 
 let nextTicketId = 1;
 let nextTicketNumber = 1001;
@@ -26,6 +34,7 @@ let nextTruckId = 1;
 let nextConjuntoId = 1;
 let nextTruckConjuntoId = 1;
 let nextTruckAuditLogId = 1;
+let nextUserId = 1;
 
 function makeTicket(partial: Partial<Ticket> & Pick<Ticket, 'plate' | 'status'>): Ticket {
   const now = new Date().toISOString();
@@ -62,12 +71,28 @@ function makeAuditEntry(ticketId: number, actor: string, action: string, payload
   };
 }
 
+function makeUser(
+  partial: Pick<MockUser, 'username' | 'password' | 'name' | 'role'> & Partial<MockUser>,
+): MockUser {
+  const now = new Date().toISOString();
+  return {
+    id: nextUserId++,
+    active: true,
+    mustChangePassword: false,
+    createdAt: now,
+    updatedAt: now,
+    ...partial,
+  };
+}
+
 export interface FixtureStore {
   tickets: Ticket[];
   auditLog: AuditLogEntry[];
   rawEvents: RawEvent[];
   status: HardwareStatus;
-  session: CurrentUser | null;
+  users: MockUser[];
+  /** Id of the logged-in user, re-read from `users` on every request like the real backend does. */
+  sessionUserId: number | null;
   trucks: Truck[];
   conjuntos: Conjunto[];
   truckAuditLog: TruckAuditLogEntry[];
@@ -75,6 +100,7 @@ export interface FixtureStore {
 
 function buildInitialStore(): FixtureStore {
   nextTicketId = 1;
+  nextUserId = 1;
   nextTicketNumber = 1001;
   nextAuditLogId = 1;
   nextRawEventId = 1;
@@ -318,7 +344,28 @@ function buildInitialStore(): FixtureStore {
     },
   ];
 
-  return { tickets, auditLog, rawEvents, status, session: null, trucks, conjuntos, truckAuditLog };
+  const users: MockUser[] = [
+    makeUser({ ...MOCK_CREDENTIALS, name: 'Administrador', role: 'admin' }),
+    makeUser({ ...MOCK_OPERATOR_CREDENTIALS, name: 'Operador da Balança', role: 'operator' }),
+    makeUser({
+      ...MOCK_PENDING_CREDENTIALS,
+      name: 'Usuário Novo',
+      role: 'operator',
+      mustChangePassword: true,
+    }),
+  ];
+
+  return {
+    tickets,
+    auditLog,
+    rawEvents,
+    status,
+    users,
+    sessionUserId: null,
+    trucks,
+    conjuntos,
+    truckAuditLog,
+  };
 }
 
 export const store: FixtureStore = buildInitialStore();
@@ -329,7 +376,8 @@ export function resetFixtures(): void {
   store.auditLog = fresh.auditLog;
   store.rawEvents = fresh.rawEvents;
   store.status = fresh.status;
-  store.session = null;
+  store.users = fresh.users;
+  store.sessionUserId = null;
   store.trucks = fresh.trucks;
   store.conjuntos = fresh.conjuntos;
   store.truckAuditLog = fresh.truckAuditLog;
@@ -361,4 +409,8 @@ export function allocateTruckConjuntoId(): number {
 
 export function allocateTruckAuditLogId(): number {
   return nextTruckAuditLogId++;
+}
+
+export function allocateUserId(): number {
+  return nextUserId++;
 }

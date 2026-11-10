@@ -10,13 +10,16 @@ import type { TicketRepository } from '../tickets/repository.js';
 import type { TicketEvents } from '../tickets/ticket-events.js';
 import type { WeighingEvents } from '../camera/weighing-events.js';
 import type { TruckRepository } from '../trucks/repository.js';
+import type { AdminUser, UserRepository } from '../users/repository.js';
 import { createAdminAuthService } from './auth-service.js';
 import { getHardwareStatus } from './hardware-status.js';
 import {
   assignConjuntoBodySchema,
+  changePasswordBodySchema,
   createConjuntoBodySchema,
   createTicketBodySchema,
   createTruckBodySchema,
+  createUserBodySchema,
   editEntryBodySchema,
   editExitBodySchema,
   editTruckPlateBodySchema,
@@ -24,13 +27,18 @@ import {
   listUnresolvedEventsQuerySchema,
   loginBodySchema,
   reprintBodySchema,
+  resetPasswordBodySchema,
   ticketIdParamsSchema,
   truckConjuntoIdParamsSchema,
   truckIdParamsSchema,
+  updateUserBodySchema,
+  userIdParamsSchema,
   type AssignConjuntoBody,
+  type ChangePasswordBody,
   type CreateConjuntoBody,
   type CreateTicketBody,
   type CreateTruckBody,
+  type CreateUserBody,
   type EditEntryBody,
   type EditExitBody,
   type EditTruckPlateBody,
@@ -38,23 +46,29 @@ import {
   type ListUnresolvedEventsQuery,
   type LoginBody,
   type ReprintBody,
+  type ResetPasswordBody,
   type TicketIdParams,
   type TruckConjuntoIdParams,
   type TruckIdParams,
+  type UpdateUserBody,
+  type UserIdParams,
 } from './schemas.js';
 import {
   serializeAuditLogEntry,
   serializeConjunto,
+  serializeCurrentUser,
   serializeRawEvent,
   serializeTicket,
   serializeTruck,
   serializeTruckAuditLogEntry,
+  serializeUser,
 } from './serialize.js';
 import './session.js';
 
 export interface AdminRoutesOptions {
   repo: TicketRepository;
   truckRepo: TruckRepository;
+  userRepo: UserRepository;
   printService: PrintService;
   scaleClient: ScaleClient;
   driverSignalAdapter: DriverSignalAdapter;
@@ -73,6 +87,22 @@ const AUDIT_ACTIONS = {
   ENTRY_EDITED: 'entry_edited',
   EXIT_EDITED: 'exit_edited',
   REPRINT_REQUESTED: 'reprint_requested',
+} as const;
+
+/**
+ * Response bodies for user/auth business errors — machine-readable codes,
+ * not prose, because the Admin UI maps each one to a translated message.
+ */
+const USER_ERRORS = {
+  PASSWORD_CHANGE_REQUIRED: 'password_change_required',
+  ADMIN_REQUIRED: 'admin_required',
+  WRONG_CURRENT_PASSWORD: 'wrong_current_password',
+  SAME_PASSWORD: 'same_password',
+  USERNAME_TAKEN: 'username_taken',
+  CANNOT_CHANGE_OWN_ROLE: 'cannot_change_own_role',
+  CANNOT_RESET_OWN_PASSWORD: 'cannot_reset_own_password',
+  CANNOT_DEACTIVATE_SELF: 'cannot_deactivate_self',
+  LAST_ACTIVE_ADMIN: 'last_active_admin',
 } as const;
 
 const TRUCK_AUDIT_ACTIONS = {
@@ -99,11 +129,47 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         cookie: { secure: false, httpOnly: true, sameSite: 'lax' },
       });
 
-      const authService = createAdminAuthService(options.repo);
+      const authService = createAdminAuthService(options.userRepo);
+      instance.decorateRequest('adminUser', null);
+
+      /**
+       * Re-reads the session's user on every request instead of trusting
+       * anything cached in the session, so deactivating a user or changing
+       * their profile takes effect on their very next request. A session
+       * whose user is gone or inactive is destroyed.
+       */
+      async function loadSessionUser(request: FastifyRequest): Promise<AdminUser | null> {
+        const userId = request.session.adminUserId;
+        if (userId === undefined) return null;
+        const user = options.userRepo.findUserById(userId);
+        if (!user || !user.active) {
+          await request.session.destroy();
+          return null;
+        }
+        return user;
+      }
 
       async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-        if (!request.session.adminUsername) {
+        const user = await loadSessionUser(request);
+        if (!user) {
           reply.code(401).send('Not authenticated');
+          return;
+        }
+        // Enforced here, not just by the UI redirect: until an admin-set
+        // password is replaced, only /auth/me, /auth/logout and
+        // /auth/change-password (none of which use this preHandler) work.
+        if (user.mustChangePassword) {
+          reply.code(403).send(USER_ERRORS.PASSWORD_CHANGE_REQUIRED);
+          return;
+        }
+        request.adminUser = user;
+      }
+
+      async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+        await requireAuth(request, reply);
+        if (reply.sent) return;
+        if (request.adminUser!.role !== 'admin') {
+          reply.code(403).send(USER_ERRORS.ADMIN_REQUIRED);
         }
       }
 
@@ -113,13 +179,13 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         '/auth/login',
         { schema: { body: loginBodySchema } },
         async (request, reply) => {
-          const username = authService.verifyCredentials(request.body.username, request.body.password);
-          if (!username) {
+          const user = authService.verifyCredentials(request.body.username, request.body.password);
+          if (!user) {
             reply.code(401).send('Invalid credentials');
             return;
           }
-          request.session.adminUsername = username;
-          reply.send({ username });
+          request.session.adminUserId = user.id;
+          reply.send(serializeCurrentUser(user));
         },
       );
 
@@ -129,12 +195,40 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
       });
 
       instance.get('/auth/me', async (request, reply) => {
-        if (!request.session.adminUsername) {
+        const user = await loadSessionUser(request);
+        if (!user) {
           reply.code(401).send('Not authenticated');
           return;
         }
-        reply.send({ username: request.session.adminUsername });
+        reply.send(serializeCurrentUser(user));
       });
+
+      instance.post<{ Body: ChangePasswordBody }>(
+        '/auth/change-password',
+        { schema: { body: changePasswordBodySchema } },
+        async (request, reply) => {
+          const user = await loadSessionUser(request);
+          if (!user) {
+            reply.code(401).send('Not authenticated');
+            return;
+          }
+          const { currentPassword, newPassword } = request.body;
+          if (!authService.verifyPassword(user, currentPassword)) {
+            reply.code(400).send(USER_ERRORS.WRONG_CURRENT_PASSWORD);
+            return;
+          }
+          if (newPassword === currentPassword) {
+            reply.code(400).send(USER_ERRORS.SAME_PASSWORD);
+            return;
+          }
+          const updated = options.userRepo.setPassword(
+            user.id,
+            authService.hashPassword(newPassword),
+            false,
+          );
+          reply.send(serializeCurrentUser(updated));
+        },
+      );
 
       // --- Tickets ---
 
@@ -162,7 +256,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.get<{ Params: TicketIdParams }>(
         '/tickets/:id',
-        { schema: { params: ticketIdParamsSchema }, preHandler: requireAuth },
+        { schema: { params: ticketIdParamsSchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const ticket = options.repo.findById(ticketId);
@@ -177,10 +271,10 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Body: CreateTicketBody }>(
         '/tickets',
-        { schema: { body: createTicketBodySchema }, preHandler: requireAuth },
+        { schema: { body: createTicketBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const { plate, entryAt, entryWeightKg, reason } = request.body;
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
 
           const ticket = options.repo.transaction(() => {
             const created = options.repo.create({
@@ -206,7 +300,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.patch<{ Params: TicketIdParams; Body: EditEntryBody }>(
         '/tickets/:id/entry',
-        { schema: { params: ticketIdParamsSchema, body: editEntryBodySchema }, preHandler: requireAuth },
+        { schema: { params: ticketIdParamsSchema, body: editEntryBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);
@@ -220,7 +314,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           }
 
           const { entryAt, entryWeightKg, cameraId, reason } = request.body;
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
 
           const updated = options.repo.transaction(() => {
             const result = options.repo.updateEntry(ticketId, {
@@ -243,7 +337,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.patch<{ Params: TicketIdParams; Body: EditExitBody }>(
         '/tickets/:id/exit',
-        { schema: { params: ticketIdParamsSchema, body: editExitBodySchema }, preHandler: requireAuth },
+        { schema: { params: ticketIdParamsSchema, body: editExitBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);
@@ -260,7 +354,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           }
 
           const { exitAt, exitWeightKg, cameraId, reason } = request.body;
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
           const exitInput = {
             exitAt: new Date(exitAt),
             exitWeightKg,
@@ -291,7 +385,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Params: TicketIdParams; Body: ReprintBody }>(
         '/tickets/:id/reprint',
-        { schema: { params: ticketIdParamsSchema, body: reprintBodySchema }, preHandler: requireAuth },
+        { schema: { params: ticketIdParamsSchema, body: reprintBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);
@@ -305,7 +399,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           }
 
           if (request.body.reason) {
-            options.repo.appendAuditLog(ticketId, request.session.adminUsername!, AUDIT_ACTIONS.REPRINT_REQUESTED, {
+            options.repo.appendAuditLog(ticketId, request.adminUser!.username, AUDIT_ACTIONS.REPRINT_REQUESTED, {
               reason: request.body.reason,
             });
           }
@@ -372,7 +466,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.get<{ Querystring: ListUnresolvedEventsQuery }>(
         '/unresolved-events',
-        { schema: { querystring: listUnresolvedEventsQuerySchema }, preHandler: requireAuth },
+        { schema: { querystring: listUnresolvedEventsQuerySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const result = options.repo.listUnresolvedEvents(request.query);
           reply.send({
@@ -390,18 +484,18 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
       // not the conjunto itself — confirmed against the real paper
       // registry the company uses today.
 
-      instance.get('/conjuntos', { preHandler: requireAuth }, async (_request, reply) => {
+      instance.get('/conjuntos', { preHandler: requireAdmin }, async (_request, reply) => {
         reply.send(options.truckRepo.listConjuntos().map(serializeConjunto));
       });
 
-      instance.get('/trucks', { preHandler: requireAuth }, async (_request, reply) => {
+      instance.get('/trucks', { preHandler: requireAdmin }, async (_request, reply) => {
         const trucks = options.truckRepo.listTrucks();
         reply.send(trucks.map((truck) => serializeTruck(truck, options.truckRepo.listTruckConjuntos(truck.id))));
       });
 
       instance.get<{ Params: TruckIdParams }>(
         '/trucks/:id',
-        { schema: { params: truckIdParamsSchema }, preHandler: requireAuth },
+        { schema: { params: truckIdParamsSchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const truckId = Number(request.params.id);
           const truck = options.truckRepo.findTruckById(truckId);
@@ -418,7 +512,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Body: CreateTruckBody }>(
         '/trucks',
-        { schema: { body: createTruckBodySchema }, preHandler: requireAuth },
+        { schema: { body: createTruckBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const { label } = request.body;
           // Must match how camera reads are normalized, or findActiveTareByPlate never hits.
@@ -431,7 +525,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             reply.code(409).send('Another truck already uses this plate');
             return;
           }
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
 
           const truck = options.truckRepo.transaction(() => {
             const created = options.truckRepo.createTruck({ plate, label });
@@ -448,7 +542,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.patch<{ Params: TruckIdParams; Body: EditTruckPlateBody }>(
         '/trucks/:id/plate',
-        { schema: { params: truckIdParamsSchema, body: editTruckPlateBodySchema }, preHandler: requireAuth },
+        { schema: { params: truckIdParamsSchema, body: editTruckPlateBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const truckId = Number(request.params.id);
           const existing = options.truckRepo.findTruckById(truckId);
@@ -470,7 +564,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             return;
           }
 
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
           const truck = options.truckRepo.transaction(() => {
             const updated = options.truckRepo.updateTruckPlate(truckId, plate);
             options.truckRepo.appendAuditLog(truckId, actor, TRUCK_AUDIT_ACTIONS.PLATE_EDITED, {
@@ -487,7 +581,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Body: CreateConjuntoBody }>(
         '/conjuntos',
-        { schema: { body: createConjuntoBodySchema }, preHandler: requireAuth },
+        { schema: { body: createConjuntoBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const existing = options.truckRepo.findConjuntoByName(request.body.name);
           if (existing) {
@@ -501,7 +595,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Params: TruckIdParams; Body: AssignConjuntoBody }>(
         '/trucks/:id/conjuntos',
-        { schema: { params: truckIdParamsSchema, body: assignConjuntoBodySchema }, preHandler: requireAuth },
+        { schema: { params: truckIdParamsSchema, body: assignConjuntoBodySchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const truckId = Number(request.params.id);
           const truck = options.truckRepo.findTruckById(truckId);
@@ -515,7 +609,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             reply.code(400).send('Either conjuntoId or conjuntoName is required');
             return;
           }
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
 
           options.truckRepo.transaction(() => {
             const conjunto = conjuntoId
@@ -544,7 +638,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Params: TruckConjuntoIdParams }>(
         '/truck-conjuntos/:id/activate',
-        { schema: { params: truckConjuntoIdParamsSchema }, preHandler: requireAuth },
+        { schema: { params: truckConjuntoIdParamsSchema }, preHandler: requireAdmin },
         async (request, reply) => {
           const truckConjuntoId = Number(request.params.id);
           const existing = options.truckRepo.findTruckConjuntoById(truckConjuntoId);
@@ -553,7 +647,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             return;
           }
 
-          const actor = request.session.adminUsername!;
+          const actor = request.adminUser!.username;
           const truckId = existing.truckId;
 
           options.truckRepo.transaction(() => {
@@ -571,7 +665,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       // --- Hardware status ---
 
-      instance.get('/status', { preHandler: requireAuth }, async (_request, reply) => {
+      instance.get('/status', { preHandler: requireAdmin }, async (_request, reply) => {
         const status = await getHardwareStatus({
           repo: options.repo,
           scaleClient: options.scaleClient,
@@ -580,6 +674,136 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         });
         reply.send(status);
       });
+
+      // --- Users (docs/plans/2026-11-09-user-management-plan.md) ---
+      // Users are deactivated, never deleted, and `username` never changes
+      // after creation — it's the `actor` already written to audit logs.
+
+      /** True if applying this change to `target` would leave no active admin at all. */
+      function wouldLeaveNoActiveAdmin(target: AdminUser): boolean {
+        return (
+          target.role === 'admin' && target.active && options.userRepo.countActiveAdmins() <= 1
+        );
+      }
+
+      instance.get('/users', { preHandler: requireAdmin }, async (_request, reply) => {
+        reply.send(options.userRepo.listUsers().map(serializeUser));
+      });
+
+      instance.post<{ Body: CreateUserBody }>(
+        '/users',
+        { schema: { body: createUserBodySchema }, preHandler: requireAdmin },
+        async (request, reply) => {
+          const { username, role, password } = request.body;
+          const name = request.body.name.trim();
+          if (!name) {
+            reply.code(400).send('Name is empty');
+            return;
+          }
+          if (options.userRepo.findUserByUsername(username)) {
+            reply.code(409).send(USER_ERRORS.USERNAME_TAKEN);
+            return;
+          }
+          const user = options.userRepo.createUser({
+            username,
+            name,
+            role,
+            passwordHash: authService.hashPassword(password),
+            mustChangePassword: true,
+          });
+          reply.code(201).send({ user: serializeUser(user) });
+        },
+      );
+
+      instance.patch<{ Params: UserIdParams; Body: UpdateUserBody }>(
+        '/users/:id',
+        {
+          schema: { params: userIdParamsSchema, body: updateUserBodySchema },
+          preHandler: requireAdmin,
+        },
+        async (request, reply) => {
+          const userId = Number(request.params.id);
+          const existing = options.userRepo.findUserById(userId);
+          if (!existing) {
+            reply.code(404).send('User not found');
+            return;
+          }
+          const { role } = request.body;
+          const name = request.body.name.trim();
+          if (!name) {
+            reply.code(400).send('Name is empty');
+            return;
+          }
+          if (role !== existing.role) {
+            if (userId === request.adminUser!.id) {
+              reply.code(400).send(USER_ERRORS.CANNOT_CHANGE_OWN_ROLE);
+              return;
+            }
+            if (wouldLeaveNoActiveAdmin(existing)) {
+              reply.code(409).send(USER_ERRORS.LAST_ACTIVE_ADMIN);
+              return;
+            }
+          }
+          const user = options.userRepo.updateUser(userId, { name, role });
+          reply.send({ user: serializeUser(user) });
+        },
+      );
+
+      instance.post<{ Params: UserIdParams; Body: ResetPasswordBody }>(
+        '/users/:id/reset-password',
+        {
+          schema: { params: userIdParamsSchema, body: resetPasswordBodySchema },
+          preHandler: requireAdmin,
+        },
+        async (request, reply) => {
+          const userId = Number(request.params.id);
+          if (!options.userRepo.findUserById(userId)) {
+            reply.code(404).send('User not found');
+            return;
+          }
+          // An admin changes their own password via /auth/change-password,
+          // which also checks the current one.
+          if (userId === request.adminUser!.id) {
+            reply.code(400).send(USER_ERRORS.CANNOT_RESET_OWN_PASSWORD);
+            return;
+          }
+          const user = options.userRepo.setPassword(
+            userId,
+            authService.hashPassword(request.body.password),
+            true,
+          );
+          reply.send({ user: serializeUser(user) });
+        },
+      );
+
+      for (const action of ['activate', 'deactivate'] as const) {
+        instance.post<{ Params: UserIdParams }>(
+          `/users/:id/${action}`,
+          { schema: { params: userIdParamsSchema }, preHandler: requireAdmin },
+          async (request, reply) => {
+            const userId = Number(request.params.id);
+            const existing = options.userRepo.findUserById(userId);
+            if (!existing) {
+              reply.code(404).send('User not found');
+              return;
+            }
+            if (action === 'deactivate') {
+              if (userId === request.adminUser!.id) {
+                reply.code(400).send(USER_ERRORS.CANNOT_DEACTIVATE_SELF);
+                return;
+              }
+              if (wouldLeaveNoActiveAdmin(existing)) {
+                reply.code(409).send(USER_ERRORS.LAST_ACTIVE_ADMIN);
+                return;
+              }
+            }
+            // Takes effect on the user's open sessions immediately: `requireAuth`
+            // re-reads the user on every request and rejects inactive ones.
+            const user = options.userRepo.setActive(userId, action === 'activate');
+            reply.send({ user: serializeUser(user) });
+          },
+        );
+      }
     },
     { prefix: '/api/admin' },
   );

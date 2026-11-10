@@ -147,6 +147,12 @@ So `core-service` comes back up after a reboot with no one logged in:
   verified-correct password) until the container was restarted and opened
   a fresh connection, even though both sides use WAL mode. Seeding before
   `docker compose up` avoids this entirely.
+- Every other user (admins and operators) is created from the Admin UI's
+  **Usuários** screen, not the seed CLI. The seed CLI stays the emergency
+  recovery path for a locked-out install (e.g. forgotten admin password).
+  Re-running it for an existing username resets that user's password and
+  forces it back to an **active admin** with no pending password change. Same
+  restart caveat as above if the container is already up.
 - `http://localhost:4100/health` (scale-bridge) and
   `http://localhost:4000/health` (print-bridge, `PRINT_BRIDGE_PORT`) report
   `{"status":"ok"}` once their services are running.

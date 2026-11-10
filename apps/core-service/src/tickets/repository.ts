@@ -3,7 +3,6 @@ import {
   tickets,
   ticketAuditLog,
   rawEvents,
-  adminUsers,
   type RawEventSource,
   type TicketStatus,
 } from '../db/schema.js';
@@ -14,7 +13,6 @@ import { createTicketEvents, type TicketEvents } from './ticket-events.js';
 export type Ticket = typeof tickets.$inferSelect;
 export type TicketAuditLogEntry = typeof ticketAuditLog.$inferSelect;
 export type RawEvent = typeof rawEvents.$inferSelect;
-export type AdminUser = typeof adminUsers.$inferSelect;
 
 /**
  * A ticket as returned by `listTickets`, flagged when any of its audit log
@@ -89,7 +87,6 @@ export interface TicketRepository {
   listTickets(query: ListTicketsQuery): Paginated<TicketListItem>;
   listUnresolvedEvents(query: ListUnresolvedEventsQuery): Paginated<RawEvent>;
   findAuditLogByTicketId(ticketId: number): TicketAuditLogEntry[];
-  findAdminUserByUsername(username: string): AdminUser | undefined;
   /** Timestamp of the most recent raw event received from this source, or null if none ever arrived. */
   findLastEventTimestamp(source: RawEventSource): Date | null;
   /**
@@ -253,10 +250,6 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .where(eq(ticketAuditLog.ticketId, ticketId))
         .orderBy(desc(ticketAuditLog.id))
         .all();
-    },
-
-    findAdminUserByUsername(username) {
-      return db.select().from(adminUsers).where(eq(adminUsers.username, username)).get();
     },
 
     findMostRecentExitAt() {

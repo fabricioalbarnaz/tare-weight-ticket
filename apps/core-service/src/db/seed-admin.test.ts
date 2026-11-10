@@ -68,4 +68,19 @@ describe('seedAdminUser', () => {
     expect(rows).toHaveLength(1);
     expect(bcrypt.compareSync('second-password', rows[0]!.passwordHash)).toBe(true);
   });
+
+  it('restores an existing user to an active admin with no pending password change (recovery path)', () => {
+    seedAdminUser(db, 'admin', 'first-password');
+    db.update(adminUsers)
+      .set({ role: 'operator', active: false, mustChangePassword: true })
+      .where(eq(adminUsers.username, 'admin'))
+      .run();
+
+    seedAdminUser(db, 'admin', 'second-password');
+
+    const row = db.select().from(adminUsers).where(eq(adminUsers.username, 'admin')).get()!;
+    expect(row.role).toBe('admin');
+    expect(row.active).toBe(true);
+    expect(row.mustChangePassword).toBe(false);
+  });
 });

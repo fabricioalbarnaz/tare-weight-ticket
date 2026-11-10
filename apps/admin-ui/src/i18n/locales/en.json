@@ -19,11 +19,13 @@
     "unresolvedEvents": "Unresolved Events",
     "internalTrucks": "Internal Trucks",
     "hardwareStatus": "Hardware Status",
-    "logout": "Log out"
+    "logout": "Log out",
+    "users": "Users",
+    "changePassword": "Change my password"
   },
   "login": {
-    "title": "Admin sign in",
-    "subtitle": "EixoLink — local admin access",
+    "title": "Sign in",
+    "subtitle": "EixoLink — local access",
     "username": "Username",
     "password": "Password",
     "signIn": "Sign in",
@@ -266,6 +268,28 @@
         "newConjuntoName": "Enter a name for the new conjunto",
         "weightPositive": "Weight must be greater than 0"
       }
+    },
+    "user": {
+      "name": "Name",
+      "username": "Username (login)",
+      "usernameHint": "3 to 32 letters, numbers, dots, dashes or underscores. Cannot be changed later.",
+      "role": "Profile",
+      "initialPassword": "Initial password",
+      "initialPasswordHint": "The user will have to change it on the first sign in.",
+      "newPassword": "New password",
+      "create": "Create user",
+      "creating": "Creating…",
+      "createError": "Could not create the user. Please try again.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved.",
+      "saveError": "Could not save. Please try again.",
+      "resetPassword": "Reset password",
+      "passwordReset": "Password reset. The user must change it on their next sign in.",
+      "validation": {
+        "name": "Enter the name",
+        "username": "Use 3 to 32 letters, numbers, dots, dashes or underscores"
+      }
     }
   },
   "tickets": {
@@ -290,5 +314,69 @@
     "filters": {
       "searchPlaceholder": "Search by plate…"
     }
+  },
+  "changePassword": {
+    "title": "Change password",
+    "description": "Pick a new password for your own login.",
+    "forcedDescription": "Your password was set by an administrator. Choose a new one of your own before continuing.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "submit": "Change password",
+    "submitting": "Saving…",
+    "success": "Password changed.",
+    "error": "Could not change the password. Please try again.",
+    "validation": {
+      "currentRequired": "Enter your current password",
+      "mismatch": "The two new passwords do not match"
+    }
+  },
+  "users": {
+    "title": "Users",
+    "description": "Who can sign in to EixoLink. Administrators can use every screen; operators can only use the Operation screen. Users are deactivated, never deleted, so the audit trail keeps their name.",
+    "newUser": "New user",
+    "createHeading": "Create user",
+    "loadError": "Could not load users.",
+    "passwordHint": "At least {{min}} characters.",
+    "roles": {
+      "admin": "Administrator",
+      "operator": "Operator"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "pendingPasswordChange": "must change password"
+    },
+    "table": {
+      "name": "Name",
+      "username": "Username",
+      "role": "Profile",
+      "status": "Status",
+      "manage": "Manage"
+    },
+    "errors": {
+      "wrong_current_password": "The current password is incorrect.",
+      "same_password": "The new password must be different from the current one.",
+      "username_taken": "This username is already in use.",
+      "cannot_change_own_role": "You cannot change your own profile.",
+      "cannot_reset_own_password": "Use \"Change my password\" to change your own password.",
+      "cannot_deactivate_self": "You cannot deactivate your own user.",
+      "last_active_admin": "There must always be at least one active administrator."
+    }
+  },
+  "userDetail": {
+    "notFound": "User not found.",
+    "backToList": "← Back to users",
+    "summary": "{{username}} · {{role}} · {{status}}",
+    "editHeading": "Name and profile",
+    "ownRoleNote": "You cannot change your own profile.",
+    "resetPasswordHeading": "Reset password",
+    "resetPasswordDescription": "Set a new initial password, e.g. when the user forgot theirs. They will have to change it on their next sign in.",
+    "ownPasswordNote": "To change your own password, use",
+    "accessHeading": "Access",
+    "deactivateDescription": "An inactive user can no longer sign in, and any open session ends immediately. They can be reactivated later.",
+    "activateDescription": "This user is inactive and cannot sign in.",
+    "deactivate": "Deactivate user",
+    "activate": "Reactivate user"
   }
 }

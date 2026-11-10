@@ -27,16 +27,34 @@ export function parseArgs(argv: string[]): { username: string; password: string 
   return { username, password };
 }
 
-/** Creates the admin user, or resets its password if the username already exists. */
+/**
+ * Creates the admin user, or resets its password if the username already
+ * exists. Also the emergency recovery path for a locked-out install: an
+ * existing user is forced back to an active admin, with no pending
+ * password change (whoever runs this CLI already knows the password).
+ */
 export function seedAdminUser(db: Db, username: string, password: string): { created: boolean } {
   const passwordHash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
   const existing = db.select().from(adminUsers).where(eq(adminUsers.username, username)).get();
+  const now = new Date();
 
   if (existing) {
-    db.update(adminUsers).set({ passwordHash }).where(eq(adminUsers.id, existing.id)).run();
+    db.update(adminUsers)
+      .set({ passwordHash, role: 'admin', active: true, mustChangePassword: false, updatedAt: now })
+      .where(eq(adminUsers.id, existing.id))
+      .run();
     return { created: false };
   }
 
-  db.insert(adminUsers).values({ username, passwordHash, createdAt: new Date() }).run();
+  db.insert(adminUsers)
+    .values({
+      username,
+      name: username,
+      passwordHash,
+      role: 'admin',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
   return { created: true };
 }

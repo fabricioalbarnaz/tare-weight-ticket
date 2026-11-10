@@ -2,11 +2,13 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { createDb, type Db } from '../db/client.js';
 import { seedAdminUser } from '../db/seed-admin.js';
+import { createUserRepository } from '../users/repository.js';
 import type { ScaleClient, ScaleStatus } from '../scale/types.js';
 import type { DriverSignalAdapter, DriverSignalStatus } from '../driver-signal/types.js';
 import type { PrintClient } from '../printing/print-client.js';
@@ -79,11 +81,11 @@ afterEach(async () => {
   }
 });
 
-async function loginCookie(): Promise<string> {
+async function loginCookie(username = 'admin', password = 'correct-password'): Promise<string> {
   const response = await fetch(`${baseUrl}/api/admin/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'correct-password' }),
+    body: JSON.stringify({ username, password }),
   });
   const setCookie = response.headers.get('set-cookie');
   if (!setCookie) throw new Error('no set-cookie header on login response');
@@ -94,6 +96,25 @@ describe('GET /api/admin/tickets/stream', () => {
   it('rejects a request without a session', async () => {
     const response = await fetch(`${baseUrl}/api/admin/tickets/stream`);
     expect(response.status).toBe(401);
+  });
+
+  it('is open to the operator profile (the Operação screen depends on it)', async () => {
+    createUserRepository(db).createUser({
+      username: 'op',
+      name: 'Operador',
+      role: 'operator',
+      passwordHash: bcrypt.hashSync('op-password', 4),
+      mustChangePassword: false,
+    });
+    const cookie = await loginCookie('op', 'op-password');
+
+    const controller = new AbortController();
+    const streamResponse = await fetch(`${baseUrl}/api/admin/tickets/stream`, {
+      headers: { Cookie: cookie },
+      signal: controller.signal,
+    });
+    expect(streamResponse.status).toBe(200);
+    controller.abort();
   });
 
   it('pushes a ticket-changed event when a ticket is created', async () => {

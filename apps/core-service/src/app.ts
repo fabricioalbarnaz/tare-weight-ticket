@@ -6,6 +6,7 @@ import { createTicketRepository } from './tickets/repository.js';
 import { createSessionService } from './tickets/session-service.js';
 import { createTruckRepository } from './trucks/repository.js';
 import { createTicketEvents } from './tickets/ticket-events.js';
+import { createUserRepository } from './users/repository.js';
 import { createWeighingEvents } from './camera/weighing-events.js';
 import type { ScaleClient } from './scale/types.js';
 import type { DriverSignalAdapter } from './driver-signal/types.js';
@@ -62,6 +63,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   });
 
   const truckRepo = createTruckRepository(options.db);
+  const userRepo = createUserRepository(options.db);
   const ticketEvents = createTicketEvents();
   const weighingEvents = createWeighingEvents();
   const repo = createTicketRepository(options.db, ticketEvents);
@@ -95,6 +97,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerAdminRoutes(app, {
     repo,
     truckRepo,
+    userRepo,
     printService,
     scaleClient: options.scaleClient,
     driverSignalAdapter: options.driverSignalAdapter,

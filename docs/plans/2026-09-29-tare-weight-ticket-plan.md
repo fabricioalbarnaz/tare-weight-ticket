@@ -112,7 +112,9 @@ Each balance PC runs one self-contained stack:
 4. **Admin UI**: React + Vite SPA served by the Core Service, reachable on
    the LAN (`http://<balance-pc-ip>:<port>`), behind simple username/password
    auth (bcrypt-hashed password, session cookie — no need for anything
-   heavier on a closed LAN). Capabilities:
+   heavier on a closed LAN). **Two profiles (2026-11-09, see §11):** `admin`
+   (everything below, plus user management) and `operator` (only the
+   read-only Operação screen). Capabilities:
    - Live table of today's tickets (open / closed / anomaly).
    - Manually create/edit an entrance or exit weight + timestamp for a
      plate, with a mandatory reason note (audit trail).
@@ -164,10 +166,16 @@ automatic, unattended system)
 | received_at | timestamp |
 | linked_ticket_id | nullable FK |
 
-`admin_users`
+`admin_users` (every Admin UI login, not only admins, despite the name; see §11
+"User management")
 | column | notes |
 |---|---|
-| id, username, password_hash, created_at | |
+| id, username, password_hash, created_at | `username` is immutable once created: it's the audit-log `actor` |
+| name | display name, required |
+| role | `admin` \| `operator` |
+| active | users are deactivated, never deleted |
+| must_change_password | set whenever an admin sets the password (creation/reset); cleared once the user picks their own |
+| updated_at | |
 
 Net weight is always `abs(entry_weight - exit_weight)`, so it's correct
 whether the truck arrived empty/left loaded or arrived loaded/left empty —
@@ -1329,3 +1337,43 @@ merge per `CLAUDE.md`):
   before the title text — not just "some bytes were added."
 - See `docs/plans/2026-11-05-ticket-logo-plan.md` for the step-by-step
   change (delete once merged, per the working-document convention).
+
+### User management: admin/operator profiles (2026-11-09)
+
+- **Two profiles, enforced server-side, not just hidden in the UI.** An
+  `operator` can only reach what the Operação screen needs
+  (`GET /api/admin/tickets`, `GET /api/admin/tickets/stream`, plus the
+  auth routes); every other admin route answers 403 `admin_required` via
+  a `requireAdmin` preHandler. Scope decided with the user: the operator
+  profile is deliberately that narrow for now.
+- **The session stores only the user id; the user row is re-read on every
+  request.** That makes deactivation and profile changes take effect on an
+  already-open session's very next request, with no session-store
+  bookkeeping (the store is in-memory anyway). It costs one indexed SQLite
+  lookup per request, which is negligible at this volume.
+- **Admin-set passwords must be replaced before anything else works.**
+  Creating a user or resetting their password sets `must_change_password`.
+  While it's set, every route except `GET /auth/me`, `POST /auth/logout`
+  and `POST /auth/change-password` answers 403 `password_change_required`.
+  The UI's redirect to the change-password page is a convenience; the
+  backend is what enforces the rule.
+- **Users are deactivated, never deleted, and `username` never changes**:
+  it's the `actor` already written to `ticket_audit_log`/`truck_audit_log`.
+  Guards: an admin can't deactivate themselves, change their own profile,
+  or reset their own password (they use "Alterar minha senha", which also
+  checks the current one), and there's always at least one active admin.
+- **Business errors on these routes are machine-readable codes**, not
+  prose (`USER_ERRORS` in `admin/routes.ts`), so the Admin UI can show a
+  translated message for each one.
+- **`db:seed-admin` stays the emergency recovery path**: re-running it for
+  an existing username also forces that user back to an active admin with
+  no pending password change.
+- **Migration `0002_user_management.sql` was hand-edited after
+  `drizzle-kit generate`**: SQLite can't `ADD` a `NOT NULL` column with no
+  default to a table that already has rows, so `name`/`updated_at` get a
+  placeholder default and are then backfilled from `username`/`created_at`.
+  This was verified against a pre-existing admin row, not just fresh test
+  DBs.
+- **Not built (possible follow-up)**: no audit trail for user-management
+  actions themselves (who created or deactivated whom). No such table
+  existed before, and the user didn't ask for one.

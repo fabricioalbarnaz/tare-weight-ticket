@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type Db } from '../db/client.js';
-import { adminUsers } from '../db/schema.js';
 import { createTicketRepository, type Ticket, type TicketRepository } from './repository.js';
 import { createTicketEvents } from './ticket-events.js';
 
@@ -618,20 +617,6 @@ describe('TicketRepository', () => {
       });
 
       expect(repo.findMostRecentExitAt()).toEqual(new Date('2026-01-01T11:00:00Z'));
-    });
-  });
-
-  describe('findAdminUserByUsername', () => {
-    it('finds a seeded admin user by username', () => {
-      db.insert(adminUsers)
-        .values({ username: 'admin', passwordHash: 'hashed', createdAt: new Date() })
-        .run();
-
-      expect(repo.findAdminUserByUsername('admin')?.username).toBe('admin');
-    });
-
-    it('returns undefined for an unknown username', () => {
-      expect(repo.findAdminUserByUsername('nobody')).toBeUndefined();
     });
   });
 

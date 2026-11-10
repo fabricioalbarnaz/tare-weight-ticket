@@ -1,17 +1,23 @@
 import { http, HttpResponse } from 'msw';
 import type {
   AssignConjuntoPayload,
+  ChangePasswordPayload,
   Conjunto,
   CreateConjuntoPayload,
   CreateTicketPayload,
   CreateTruckPayload,
+  CreateUserPayload,
+  CurrentUser,
   EditEntryPayload,
   EditExitPayload,
   EditTruckPlatePayload,
   LoginPayload,
   ReprintPayload,
+  ResetPasswordPayload,
   Ticket,
   TruckConjunto,
+  UpdateUserPayload,
+  User,
 } from '../types';
 import {
   allocateAuditLogId,
@@ -21,8 +27,9 @@ import {
   allocateTruckAuditLogId,
   allocateTruckConjuntoId,
   allocateTruckId,
-  MOCK_CREDENTIALS,
+  allocateUserId,
   store,
+  type MockUser,
 } from './fixtures';
 
 const BASE = '/api/admin';
@@ -35,8 +42,49 @@ function notFound(message: string) {
   return HttpResponse.text(message, { status: 404 });
 }
 
+/** The session's user, re-read on every request (like the real backend) so deactivation applies immediately. */
+function sessionUser(): MockUser | null {
+  const user = store.users.find((u) => u.id === store.sessionUserId);
+  return user && user.active ? user : null;
+}
+
 function requireAuth(): boolean {
-  return store.session !== null;
+  const user = sessionUser();
+  return user !== null && !user.mustChangePassword;
+}
+
+function currentUsername(): string {
+  return sessionUser()?.username ?? 'admin';
+}
+
+/** Real backend answers 401 without a session and 403 for a non-admin; mirrored here for the users routes. */
+function adminGuard() {
+  if (!requireAuth()) return unauthorized();
+  if (sessionUser()!.role !== 'admin') return HttpResponse.text('admin_required', { status: 403 });
+  return null;
+}
+
+function toCurrentUser(user: MockUser): CurrentUser {
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword,
+  };
+}
+
+function toUser(user: MockUser): User {
+  return {
+    ...toCurrentUser(user),
+    active: user.active,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
+function userError(code: string, status: number) {
+  return HttpResponse.text(code, { status });
 }
 
 function appendAudit(ticketId: number, actor: string, action: string, payload: unknown) {
@@ -63,21 +111,107 @@ function paginate<T>(items: T[], page: number, pageSize: number) {
 export const handlers = [
   http.post(`${BASE}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as LoginPayload;
-    if (body.username !== MOCK_CREDENTIALS.username || body.password !== MOCK_CREDENTIALS.password) {
+    const user = store.users.find((u) => u.username === body.username);
+    if (!user || !user.active || user.password !== body.password) {
       return unauthorized();
     }
-    store.session = { username: body.username };
-    return HttpResponse.json({ username: body.username });
+    store.sessionUserId = user.id;
+    return HttpResponse.json(toCurrentUser(user));
   }),
 
   http.post(`${BASE}/auth/logout`, () => {
-    store.session = null;
+    store.sessionUserId = null;
     return new HttpResponse(null, { status: 204 });
   }),
 
   http.get(`${BASE}/auth/me`, () => {
-    if (!requireAuth()) return unauthorized();
-    return HttpResponse.json(store.session);
+    const user = sessionUser();
+    if (!user) return unauthorized();
+    return HttpResponse.json(toCurrentUser(user));
+  }),
+
+  http.post(`${BASE}/auth/change-password`, async ({ request }) => {
+    const user = sessionUser();
+    if (!user) return unauthorized();
+    const body = (await request.json()) as ChangePasswordPayload;
+    if (body.currentPassword !== user.password) return userError('wrong_current_password', 400);
+    if (body.newPassword === user.password) return userError('same_password', 400);
+    user.password = body.newPassword;
+    user.mustChangePassword = false;
+    user.updatedAt = new Date().toISOString();
+    return HttpResponse.json(toCurrentUser(user));
+  }),
+
+  http.get(`${BASE}/users`, () => {
+    const denied = adminGuard();
+    if (denied) return denied;
+    return HttpResponse.json(
+      [...store.users].sort((a, b) => a.name.localeCompare(b.name)).map(toUser),
+    );
+  }),
+
+  http.post(`${BASE}/users`, async ({ request }) => {
+    const denied = adminGuard();
+    if (denied) return denied;
+    const body = (await request.json()) as CreateUserPayload;
+    if (store.users.some((u) => u.username === body.username))
+      return userError('username_taken', 409);
+    const now = new Date().toISOString();
+    const user: MockUser = {
+      id: allocateUserId(),
+      username: body.username,
+      name: body.name.trim(),
+      role: body.role,
+      password: body.password,
+      active: true,
+      mustChangePassword: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.users.push(user);
+    return HttpResponse.json({ user: toUser(user) }, { status: 201 });
+  }),
+
+  http.patch(`${BASE}/users/:id`, async ({ params, request }) => {
+    const denied = adminGuard();
+    if (denied) return denied;
+    const user = store.users.find((u) => u.id === Number(params.id));
+    if (!user) return notFound(`User ${params.id} not found`);
+    const body = (await request.json()) as UpdateUserPayload;
+    if (body.role !== user.role && user.id === store.sessionUserId)
+      return userError('cannot_change_own_role', 400);
+    user.name = body.name.trim();
+    user.role = body.role;
+    user.updatedAt = new Date().toISOString();
+    return HttpResponse.json({ user: toUser(user) });
+  }),
+
+  http.post(`${BASE}/users/:id/reset-password`, async ({ params, request }) => {
+    const denied = adminGuard();
+    if (denied) return denied;
+    const user = store.users.find((u) => u.id === Number(params.id));
+    if (!user) return notFound(`User ${params.id} not found`);
+    if (user.id === store.sessionUserId) return userError('cannot_reset_own_password', 400);
+    const body = (await request.json()) as ResetPasswordPayload;
+    user.password = body.password;
+    user.mustChangePassword = true;
+    user.updatedAt = new Date().toISOString();
+    return HttpResponse.json({ user: toUser(user) });
+  }),
+
+  http.post(`${BASE}/users/:id/:action`, ({ params }) => {
+    const denied = adminGuard();
+    if (denied) return denied;
+    if (params.action !== 'activate' && params.action !== 'deactivate')
+      return notFound('Unknown action');
+    const user = store.users.find((u) => u.id === Number(params.id));
+    if (!user) return notFound(`User ${params.id} not found`);
+    if (params.action === 'deactivate' && user.id === store.sessionUserId) {
+      return userError('cannot_deactivate_self', 400);
+    }
+    user.active = params.action === 'activate';
+    user.updatedAt = new Date().toISOString();
+    return HttpResponse.json({ user: toUser(user) });
   }),
 
   http.get(`${BASE}/tickets`, ({ request }) => {
@@ -135,7 +269,7 @@ export const handlers = [
       updatedAt: now,
     };
     store.tickets.push(ticket);
-    appendAudit(ticket.id, store.session?.username ?? 'admin', 'manual_create', {
+    appendAudit(ticket.id, currentUsername(), 'manual_create', {
       reason: body.reason,
     });
     return HttpResponse.json({ ticket }, { status: 201 });
@@ -157,7 +291,7 @@ export const handlers = [
       ticket.netWeightKg = Math.abs(ticket.entryWeightKg - ticket.exitWeightKg);
     }
 
-    appendAudit(ticket.id, store.session?.username ?? 'admin', 'manual_edit', {
+    appendAudit(ticket.id, currentUsername(), 'manual_edit', {
       leg: 'entry',
       entryAt: body.entryAt,
       entryWeightKg: body.entryWeightKg,
@@ -184,7 +318,7 @@ export const handlers = [
       ticket.netWeightKg = Math.abs(ticket.entryWeightKg - body.exitWeightKg);
     }
 
-    appendAudit(ticket.id, store.session?.username ?? 'admin', 'manual_edit', {
+    appendAudit(ticket.id, currentUsername(), 'manual_edit', {
       leg: 'exit',
       exitAt: body.exitAt,
       exitWeightKg: body.exitWeightKg,
@@ -202,7 +336,7 @@ export const handlers = [
     const body = (await request.json().catch(() => ({}))) as ReprintPayload;
 
     ticket.printedAt = new Date().toISOString();
-    appendAudit(ticket.id, store.session?.username ?? 'admin', 'reprint', {
+    appendAudit(ticket.id, currentUsername(), 'reprint', {
       reason: body.reason ?? null,
     });
 
@@ -262,7 +396,7 @@ export const handlers = [
     store.truckAuditLog.push({
       id: allocateTruckAuditLogId(),
       truckId: truck.id,
-      actor: store.session?.username ?? 'admin',
+      actor: currentUsername(),
       action: 'truck_created',
       payload: { plate: truck.plate, label: truck.label },
       createdAt: now,
@@ -287,7 +421,7 @@ export const handlers = [
     store.truckAuditLog.push({
       id: allocateTruckAuditLogId(),
       truckId: id,
-      actor: store.session?.username ?? 'admin',
+      actor: currentUsername(),
       action: 'plate_edited',
       payload: { reason: body.reason, before: { plate: before }, after: { plate } },
       createdAt: now,
@@ -346,7 +480,7 @@ export const handlers = [
     store.truckAuditLog.push({
       id: allocateTruckAuditLogId(),
       truckId,
-      actor: store.session?.username ?? 'admin',
+      actor: currentUsername(),
       action: 'conjunto_assigned',
       payload: { truckConjuntoId: assignment.id, conjuntoName: conjunto.name, tareWeightKg: assignment.tareWeightKg },
       createdAt: now,
@@ -369,7 +503,7 @@ export const handlers = [
     store.truckAuditLog.push({
       id: allocateTruckAuditLogId(),
       truckId: truck.id,
-      actor: store.session?.username ?? 'admin',
+      actor: currentUsername(),
       action: 'conjunto_activated',
       payload: { truckConjuntoId: target.id, conjuntoName: target.conjuntoName, tareWeightKg: target.tareWeightKg },
       createdAt: now,

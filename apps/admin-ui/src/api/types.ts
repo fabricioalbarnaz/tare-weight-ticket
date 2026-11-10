@@ -122,8 +122,51 @@ export interface HardwareStatus {
   relay: HardwareComponentStatus;
 }
 
+/**
+ * Admin UI users (docs/plans/2026-11-09-user-management-plan.md). An
+ * `operator` can only use the Operação screen; everything else is
+ * `admin`-only, enforced server-side too.
+ */
+export const USER_ROLES = ['admin', 'operator'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+/** Mirrors `MIN_PASSWORD_LENGTH` in `apps/core-service/src/admin/auth-service.ts`. */
+export const MIN_PASSWORD_LENGTH = 6;
+
 export interface CurrentUser {
+  id: number;
   username: string;
+  name: string;
+  role: UserRole;
+  /** True right after an admin set this user's password — every screen redirects to the change-password page until it's done. */
+  mustChangePassword: boolean;
+}
+
+export interface User extends CurrentUser {
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateUserPayload {
+  username: string;
+  name: string;
+  role: UserRole;
+  password: string;
+}
+
+export interface UpdateUserPayload {
+  name: string;
+  role: UserRole;
+}
+
+export interface ResetPasswordPayload {
+  password: string;
+}
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
 }
 
 /**

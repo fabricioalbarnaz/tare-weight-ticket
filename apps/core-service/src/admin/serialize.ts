@@ -1,5 +1,6 @@
 import type { RawEvent, Ticket, TicketAuditLogEntry } from '../tickets/repository.js';
 import type { Conjunto, InternalTruck, TruckAuditLogEntry, TruckConjuntoWithName } from '../trucks/repository.js';
+import type { AdminUser } from '../users/repository.js';
 
 /**
  * Wire shapes for the Admin API, matching `apps/admin-ui/src/api/types.ts`
@@ -168,5 +169,40 @@ export function serializeTruckAuditLogEntry(entry: TruckAuditLogEntry): Serializ
     action: entry.action,
     payload: entry.payload ? JSON.parse(entry.payload) : null,
     createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+/** The logged-in user, as returned by `POST /auth/login` and `GET /auth/me`. */
+export interface SerializedCurrentUser {
+  id: number;
+  username: string;
+  name: string;
+  role: AdminUser['role'];
+  mustChangePassword: boolean;
+}
+
+/** A row of the user-management listing — never carries the password hash. */
+export interface SerializedUser extends SerializedCurrentUser {
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function serializeCurrentUser(user: AdminUser): SerializedCurrentUser {
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword,
+  };
+}
+
+export function serializeUser(user: AdminUser): SerializedUser {
+  return {
+    ...serializeCurrentUser(user),
+    active: user.active,
+    createdAt: user.createdAt.toISOString(),
+    updatedAt: user.updatedAt.toISOString(),
   };
 }

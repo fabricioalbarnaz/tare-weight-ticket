@@ -221,3 +221,82 @@ export interface AssignConjuntoBody {
   conjuntoName?: string;
   tareWeightKg: number;
 }
+
+// --- Users (docs/plans/2026-11-09-user-management-plan.md) ---
+// `minLength: 6` on every new password mirrors `MIN_PASSWORD_LENGTH` in
+// `auth-service.ts` (JSON schemas here are `as const` literals, so the
+// constant can't be interpolated without losing the literal types).
+
+export const userIdParamsSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '^[0-9]+$' },
+  },
+  required: ['id'],
+} as const;
+
+export const createUserBodySchema = {
+  type: 'object',
+  properties: {
+    username: { type: 'string', pattern: '^[A-Za-z0-9._-]{3,32}$' },
+    name: { type: 'string', minLength: 1 },
+    role: { type: 'string', enum: ['admin', 'operator'] },
+    password: { type: 'string', minLength: 6 },
+  },
+  required: ['username', 'name', 'role', 'password'],
+  additionalProperties: false,
+} as const;
+
+export const updateUserBodySchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    role: { type: 'string', enum: ['admin', 'operator'] },
+  },
+  required: ['name', 'role'],
+  additionalProperties: false,
+} as const;
+
+export const resetPasswordBodySchema = {
+  type: 'object',
+  properties: {
+    password: { type: 'string', minLength: 6 },
+  },
+  required: ['password'],
+  additionalProperties: false,
+} as const;
+
+export const changePasswordBodySchema = {
+  type: 'object',
+  properties: {
+    currentPassword: { type: 'string', minLength: 1 },
+    newPassword: { type: 'string', minLength: 6 },
+  },
+  required: ['currentPassword', 'newPassword'],
+  additionalProperties: false,
+} as const;
+
+export interface UserIdParams {
+  id: string;
+}
+
+export interface CreateUserBody {
+  username: string;
+  name: string;
+  role: 'admin' | 'operator';
+  password: string;
+}
+
+export interface UpdateUserBody {
+  name: string;
+  role: 'admin' | 'operator';
+}
+
+export interface ResetPasswordBody {
+  password: string;
+}
+
+export interface ChangePasswordBody {
+  currentPassword: string;
+  newPassword: string;
+}

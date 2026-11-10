@@ -19,11 +19,13 @@
     "unresolvedEvents": "Eventos Não Resolvidos",
     "internalTrucks": "Caminhões Internos",
     "hardwareStatus": "Status do Equipamento",
-    "logout": "Sair"
+    "logout": "Sair",
+    "users": "Usuários",
+    "changePassword": "Alterar minha senha"
   },
   "login": {
-    "title": "Acesso do administrador",
-    "subtitle": "EixoLink — acesso administrativo local",
+    "title": "Acesso ao sistema",
+    "subtitle": "EixoLink — acesso local",
     "username": "Usuário",
     "password": "Senha",
     "signIn": "Entrar",
@@ -266,6 +268,28 @@
         "newConjuntoName": "Informe um nome para o novo conjunto",
         "weightPositive": "O peso deve ser maior que 0"
       }
+    },
+    "user": {
+      "name": "Nome",
+      "username": "Usuário (login)",
+      "usernameHint": "De 3 a 32 letras, números, pontos, hífens ou sublinhados. Não pode ser alterado depois.",
+      "role": "Perfil",
+      "initialPassword": "Senha inicial",
+      "initialPasswordHint": "O usuário terá que trocá-la no primeiro acesso.",
+      "newPassword": "Nova senha",
+      "create": "Cadastrar usuário",
+      "creating": "Cadastrando…",
+      "createError": "Não foi possível cadastrar o usuário. Tente novamente.",
+      "save": "Salvar",
+      "saving": "Salvando…",
+      "saved": "Salvo.",
+      "saveError": "Não foi possível salvar. Tente novamente.",
+      "resetPassword": "Redefinir senha",
+      "passwordReset": "Senha redefinida. O usuário terá que trocá-la no próximo acesso.",
+      "validation": {
+        "name": "Informe o nome",
+        "username": "Use de 3 a 32 letras, números, pontos, hífens ou sublinhados"
+      }
     }
   },
   "tickets": {
@@ -290,5 +314,69 @@
     "filters": {
       "searchPlaceholder": "Buscar por placa…"
     }
+  },
+  "changePassword": {
+    "title": "Alterar senha",
+    "description": "Escolha uma nova senha para o seu login.",
+    "forcedDescription": "Sua senha foi definida por um administrador. Escolha uma senha própria antes de continuar.",
+    "currentPassword": "Senha atual",
+    "newPassword": "Nova senha",
+    "confirmPassword": "Confirme a nova senha",
+    "submit": "Alterar senha",
+    "submitting": "Salvando…",
+    "success": "Senha alterada.",
+    "error": "Não foi possível alterar a senha. Tente novamente.",
+    "validation": {
+      "currentRequired": "Informe a senha atual",
+      "mismatch": "As duas senhas novas não são iguais"
+    }
+  },
+  "users": {
+    "title": "Usuários",
+    "description": "Quem pode entrar no EixoLink. Administradores usam todas as telas; operadores só usam a tela de Operação. Usuários são inativados, nunca excluídos, para que a trilha de auditoria mantenha o nome deles.",
+    "newUser": "Novo usuário",
+    "createHeading": "Cadastrar usuário",
+    "loadError": "Não foi possível carregar os usuários.",
+    "passwordHint": "Mínimo de {{min}} caracteres.",
+    "roles": {
+      "admin": "Administrador",
+      "operator": "Operador"
+    },
+    "status": {
+      "active": "Ativo",
+      "inactive": "Inativo",
+      "pendingPasswordChange": "precisa trocar a senha"
+    },
+    "table": {
+      "name": "Nome",
+      "username": "Usuário",
+      "role": "Perfil",
+      "status": "Situação",
+      "manage": "Gerenciar"
+    },
+    "errors": {
+      "wrong_current_password": "A senha atual está incorreta.",
+      "same_password": "A nova senha precisa ser diferente da atual.",
+      "username_taken": "Este usuário (login) já está em uso.",
+      "cannot_change_own_role": "Você não pode alterar o seu próprio perfil.",
+      "cannot_reset_own_password": "Use \"Alterar minha senha\" para trocar a sua própria senha.",
+      "cannot_deactivate_self": "Você não pode inativar o seu próprio usuário.",
+      "last_active_admin": "É preciso manter pelo menos um administrador ativo."
+    }
+  },
+  "userDetail": {
+    "notFound": "Usuário não encontrado.",
+    "backToList": "← Voltar aos usuários",
+    "summary": "{{username}} · {{role}} · {{status}}",
+    "editHeading": "Nome e perfil",
+    "ownRoleNote": "Você não pode alterar o seu próprio perfil.",
+    "resetPasswordHeading": "Redefinir senha",
+    "resetPasswordDescription": "Defina uma nova senha inicial, por exemplo quando o usuário esqueceu a dele. Ele terá que trocá-la no próximo acesso.",
+    "ownPasswordNote": "Para trocar a sua própria senha, use",
+    "accessHeading": "Acesso",
+    "deactivateDescription": "Um usuário inativo não consegue mais entrar, e qualquer sessão aberta dele é encerrada na hora. Ele pode ser reativado depois.",
+    "activateDescription": "Este usuário está inativo e não consegue entrar.",
+    "deactivate": "Inativar usuário",
+    "activate": "Reativar usuário"
   }
 }
