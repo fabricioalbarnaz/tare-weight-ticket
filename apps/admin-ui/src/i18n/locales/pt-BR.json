@@ -153,13 +153,16 @@
     "activateError": "Não foi possível ativar este conjunto. Tente novamente.",
     "assignConjuntoHeading": "Atribuir um conjunto",
     "assignConjuntoDescription": "Escolha um conjunto existente (compartilhado entre caminhões) ou crie um novo, e defina a tara deste caminhão para ele.",
+    "editPlateHeading": "Editar placa",
+    "editPlateDescription": "Corrija uma placa digitada errada ou atualize-a após uma troca de placa. Os conjuntos e taras continuam vinculados a este caminhão.",
     "auditTrail": "Trilha de auditoria"
   },
   "truckAuditLog": {
     "actions": {
       "truck_created": "Caminhão cadastrado",
       "conjunto_assigned": "Conjunto atribuído",
-      "conjunto_activated": "Conjunto ativado"
+      "conjunto_activated": "Conjunto ativado",
+      "plate_edited": "Placa editada"
     }
   },
   "auditLog": {
@@ -223,12 +226,28 @@
       "cancel": "Cancelar",
       "error": "Falha ao reimprimir."
     },
+    "editTruckPlate": {
+      "ariaLabel": "Editar placa do caminhão",
+      "plate": "Placa",
+      "reason": "Motivo da alteração",
+      "reasonPlaceholder": "ex.: placa digitada errada no cadastro",
+      "submit": "Salvar placa",
+      "submitting": "Salvando…",
+      "success": "Salvo. Veja a trilha de auditoria abaixo.",
+      "error": "Não foi possível salvar a placa. Tente novamente.",
+      "duplicate": "Outro caminhão interno já usa esta placa.",
+      "validation": {
+        "plate": "Informe a placa",
+        "reason": "Explique a alteração (mínimo de 5 caracteres)"
+      }
+    },
     "createTruck": {
       "plate": "Placa",
       "label": "Rótulo (opcional)",
       "submit": "Cadastrar caminhão",
       "submitting": "Cadastrando…",
       "error": "Não foi possível cadastrar o caminhão. Tente novamente.",
+      "duplicate": "Já existe um caminhão interno com esta placa.",
       "validation": {
         "plate": "Informe a placa"
       }

@@ -35,6 +35,16 @@ describe('TruckRepository', () => {
     expect(repo.findTruckById(truck.id)?.label).toBe('Caminhão 1');
   });
 
+  it('updates a truck plate', () => {
+    const truck = repo.createTruck({ plate: 'ABC1234', label: 'Caminhão 1' });
+
+    const updated = repo.updateTruckPlate(truck.id, 'XYZ9999');
+
+    expect(updated.plate).toBe('XYZ9999');
+    expect(repo.findTruckByPlate('ABC1234')).toBeUndefined();
+    expect(repo.findTruckByPlate('XYZ9999')?.id).toBe(truck.id);
+  });
+
   it('lists trucks', () => {
     repo.createTruck({ plate: 'AAA1111' });
     repo.createTruck({ plate: 'BBB2222' });

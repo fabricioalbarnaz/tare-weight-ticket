@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { api } from '../../api/client';
+import { ApiError, api } from '../../api/client';
 
 function createTruckSchema(t: TFunction) {
   return z.object({
@@ -77,7 +77,13 @@ export function CreateTruckForm() {
       >
         {mutation.isPending ? t('forms.createTruck.submitting') : t('forms.createTruck.submit')}
       </button>
-      {mutation.isError && <p className="text-xs text-red-600">{t('forms.createTruck.error')}</p>}
+      {mutation.isError && (
+        <p className="text-xs text-red-600">
+          {mutation.error instanceof ApiError && mutation.error.status === 409
+            ? t('forms.createTruck.duplicate')
+            : t('forms.createTruck.error')}
+        </p>
+      )}
     </form>
   );
 }

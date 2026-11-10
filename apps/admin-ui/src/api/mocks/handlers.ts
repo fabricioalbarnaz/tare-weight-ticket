@@ -7,6 +7,7 @@ import type {
   CreateTruckPayload,
   EditEntryPayload,
   EditExitPayload,
+  EditTruckPlatePayload,
   LoginPayload,
   ReprintPayload,
   Ticket,
@@ -244,10 +245,14 @@ export const handlers = [
   http.post(`${BASE}/trucks`, async ({ request }) => {
     if (!requireAuth()) return unauthorized();
     const body = (await request.json()) as CreateTruckPayload;
+    const plate = body.plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (store.trucks.some((t) => t.plate === plate)) {
+      return HttpResponse.text('Another truck already uses this plate', { status: 409 });
+    }
     const now = new Date().toISOString();
     const truck = {
       id: allocateTruckId(),
-      plate: body.plate.toUpperCase(),
+      plate,
       label: body.label ?? null,
       createdAt: now,
       updatedAt: now,
@@ -263,6 +268,31 @@ export const handlers = [
       createdAt: now,
     });
     return HttpResponse.json({ truck }, { status: 201 });
+  }),
+
+  http.patch(`${BASE}/trucks/:id/plate`, async ({ params, request }) => {
+    if (!requireAuth()) return unauthorized();
+    const id = Number(params.id);
+    const truck = store.trucks.find((t) => t.id === id);
+    if (!truck) return notFound(`Truck ${id} not found`);
+    const body = (await request.json()) as EditTruckPlatePayload;
+    const plate = body.plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (store.trucks.some((t) => t.plate === plate && t.id !== id)) {
+      return HttpResponse.text('Another truck already uses this plate', { status: 409 });
+    }
+    const now = new Date().toISOString();
+    const before = truck.plate;
+    truck.plate = plate;
+    truck.updatedAt = now;
+    store.truckAuditLog.push({
+      id: allocateTruckAuditLogId(),
+      truckId: id,
+      actor: store.session?.username ?? 'admin',
+      action: 'plate_edited',
+      payload: { reason: body.reason, before: { plate: before }, after: { plate } },
+      createdAt: now,
+    });
+    return HttpResponse.json({ truck });
   }),
 
   http.get(`${BASE}/conjuntos`, () => {

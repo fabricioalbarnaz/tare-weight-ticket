@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { AssignConjuntoForm } from '../components/forms/AssignConjuntoForm';
+import { EditTruckPlateForm } from '../components/forms/EditTruckPlateForm';
 import { formatDateTime } from '../lib/datetime';
 
 export function TruckDetailPage() {
@@ -104,6 +105,12 @@ export function TruckDetailPage() {
           <h2 className="mb-1 text-sm font-semibold text-slate-900">{t('truckDetail.assignConjuntoHeading')}</h2>
           <p className="mb-3 text-xs text-slate-500">{t('truckDetail.assignConjuntoDescription')}</p>
           <AssignConjuntoForm truckId={truckId} />
+        </section>
+
+        <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+          <h2 className="mb-1 text-sm font-semibold text-slate-900">{t('truckDetail.editPlateHeading')}</h2>
+          <p className="mb-3 text-xs text-slate-500">{t('truckDetail.editPlateDescription')}</p>
+          <EditTruckPlateForm key={truck.id} truck={truck} />
         </section>
 
         <section>

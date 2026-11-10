@@ -153,13 +153,16 @@
     "activateError": "Couldn't activate this conjunto. Please try again.",
     "assignConjuntoHeading": "Assign a conjunto",
     "assignConjuntoDescription": "Pick an existing conjunto (shared across trucks) or create a new one, and set this truck's tare for it.",
+    "editPlateHeading": "Edit plate",
+    "editPlateDescription": "Fix a mistyped plate or update it after a plate change. Conjuntos and tares stay with this truck.",
     "auditTrail": "Audit trail"
   },
   "truckAuditLog": {
     "actions": {
       "truck_created": "Truck registered",
       "conjunto_assigned": "Conjunto assigned",
-      "conjunto_activated": "Conjunto activated"
+      "conjunto_activated": "Conjunto activated",
+      "plate_edited": "Plate edited"
     }
   },
   "auditLog": {
@@ -223,12 +226,28 @@
       "cancel": "Cancel",
       "error": "Reprint failed."
     },
+    "editTruckPlate": {
+      "ariaLabel": "Edit truck plate",
+      "plate": "Plate",
+      "reason": "Reason for this change",
+      "reasonPlaceholder": "e.g. plate was mistyped at registration",
+      "submit": "Save plate",
+      "submitting": "Saving…",
+      "success": "Saved. See the audit trail below.",
+      "error": "Couldn't save the plate. Try again.",
+      "duplicate": "Another internal truck already uses this plate.",
+      "validation": {
+        "plate": "Enter the plate",
+        "reason": "Explain the change (at least 5 characters)"
+      }
+    },
     "createTruck": {
       "plate": "Plate",
       "label": "Label (optional)",
       "submit": "Register truck",
       "submitting": "Registering…",
       "error": "Could not register the truck. Please try again.",
+      "duplicate": "An internal truck with this plate already exists.",
       "validation": {
         "plate": "Enter the plate"
       }

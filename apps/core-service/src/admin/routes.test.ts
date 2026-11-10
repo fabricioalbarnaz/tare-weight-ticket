@@ -455,10 +455,124 @@ describe('Internal trucks / conjuntos', () => {
     expect(detail.json().auditLog[0].action).toBe('truck_created');
   });
 
+  it('normalizes the plate on creation the same way camera reads are normalized', async () => {
+    const cookie = await loginCookie();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/trucks',
+      headers: { cookie },
+      payload: { plate: ' int-0020 ' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().truck.plate).toBe('INT0020');
+  });
+
+  it('rejects creating a truck with a plate that is already registered', async () => {
+    const cookie = await loginCookie();
+    await createTruck(cookie, 'INT0021');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/trucks',
+      headers: { cookie },
+      payload: { plate: 'int-0021' },
+    });
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('rejects creating a truck whose plate is empty after normalization', async () => {
+    const cookie = await loginCookie();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/trucks',
+      headers: { cookie },
+      payload: { plate: '---' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it('returns 404 for a truck that does not exist', async () => {
     const cookie = await loginCookie();
     const response = await app.inject({ method: 'GET', url: '/api/admin/trucks/999999', headers: { cookie } });
     expect(response.statusCode).toBe(404);
+  });
+
+  it('edits a truck plate and records it in the audit log', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0010');
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/trucks/${truckId}/plate`,
+      headers: { cookie },
+      payload: { plate: 'INT0011', reason: 'Placa cadastrada errada, corrigida pelo motorista' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().truck.plate).toBe('INT0011');
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/trucks/${truckId}`,
+      headers: { cookie },
+    });
+    expect(detail.json().truck.plate).toBe('INT0011');
+    expect(detail.json().auditLog[0]).toEqual(
+      expect.objectContaining({
+        action: 'plate_edited',
+        payload: {
+          reason: 'Placa cadastrada errada, corrigida pelo motorista',
+          before: { plate: 'INT0010' },
+          after: { plate: 'INT0011' },
+        },
+      }),
+    );
+  });
+
+  it('returns 404 editing the plate of a truck that does not exist', async () => {
+    const cookie = await loginCookie();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/admin/trucks/999999/plate',
+      headers: { cookie },
+      payload: { plate: 'INT0099', reason: 'teste' },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('normalizes the edited plate the same way camera reads are normalized', async () => {
+    const cookie = await loginCookie();
+    const truckId = await createTruck(cookie, 'INT0014');
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/trucks/${truckId}/plate`,
+      headers: { cookie },
+      payload: { plate: ' int-0015 ', reason: 'teste' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().truck.plate).toBe('INT0015');
+  });
+
+  it('rejects editing a plate to one already used by another truck', async () => {
+    const cookie = await loginCookie();
+    const truckA = await createTruck(cookie, 'INT0012');
+    await createTruck(cookie, 'INT0013');
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/trucks/${truckA}/plate`,
+      headers: { cookie },
+      payload: { plate: 'INT0013', reason: 'teste' },
+    });
+
+    expect(response.statusCode).toBe(409);
   });
 
   it('creates a conjunto, lists shared conjuntos, and rejects a duplicate name', async () => {

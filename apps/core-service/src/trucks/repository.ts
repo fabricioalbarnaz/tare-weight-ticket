@@ -38,6 +38,7 @@ export interface TruckRepository {
   findTruckById(truckId: number): InternalTruck | undefined;
   findTruckByPlate(plate: string): InternalTruck | undefined;
   createTruck(input: CreateTruckInput): InternalTruck;
+  updateTruckPlate(truckId: number, plate: string): InternalTruck;
 
   listConjuntos(): Conjunto[];
   findConjuntoById(conjuntoId: number): Conjunto | undefined;
@@ -99,6 +100,15 @@ export function createTruckRepository(db: Db): TruckRepository {
           createdAt: now,
           updatedAt: now,
         })
+        .returning()
+        .get();
+    },
+
+    updateTruckPlate(truckId, plate) {
+      return db
+        .update(internalTrucks)
+        .set({ plate, updatedAt: new Date() })
+        .where(eq(internalTrucks.id, truckId))
         .returning()
         .get();
     },

@@ -7,6 +7,7 @@ import type {
   CurrentUser,
   EditEntryPayload,
   EditExitPayload,
+  EditTruckPlatePayload,
   HardwareStatus,
   LoginPayload,
   Paginated,
@@ -122,6 +123,10 @@ export const api = {
 
   createTruck(payload: CreateTruckPayload): Promise<{ truck: Truck }> {
     return request('/trucks', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  editTruckPlate(id: number, payload: EditTruckPlatePayload): Promise<{ truck: Truck }> {
+    return request(`/trucks/${id}/plate`, { method: 'PATCH', body: JSON.stringify(payload) });
   },
 
   listConjuntos(): Promise<Conjunto[]> {

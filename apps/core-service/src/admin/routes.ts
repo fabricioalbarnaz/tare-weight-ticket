@@ -1,6 +1,7 @@
 import fastifyCookie from '@fastify/cookie';
 import fastifySession from '@fastify/session';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { normalizePlate } from '../domain/plate.js';
 import type { DriverSignalAdapter } from '../driver-signal/types.js';
 import type { PrintClient } from '../printing/print-client.js';
 import type { PrintService } from '../printing/print-service.js';
@@ -18,6 +19,7 @@ import {
   createTruckBodySchema,
   editEntryBodySchema,
   editExitBodySchema,
+  editTruckPlateBodySchema,
   listTicketsQuerySchema,
   listUnresolvedEventsQuerySchema,
   loginBodySchema,
@@ -31,6 +33,7 @@ import {
   type CreateTruckBody,
   type EditEntryBody,
   type EditExitBody,
+  type EditTruckPlateBody,
   type ListTicketsQuery,
   type ListUnresolvedEventsQuery,
   type LoginBody,
@@ -74,6 +77,7 @@ const AUDIT_ACTIONS = {
 
 const TRUCK_AUDIT_ACTIONS = {
   TRUCK_CREATED: 'truck_created',
+  PLATE_EDITED: 'plate_edited',
   CONJUNTO_ASSIGNED: 'conjunto_assigned',
   CONJUNTO_ACTIVATED: 'conjunto_activated',
 } as const;
@@ -416,7 +420,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         '/trucks',
         { schema: { body: createTruckBodySchema }, preHandler: requireAuth },
         async (request, reply) => {
-          const { plate, label } = request.body;
+          const { label } = request.body;
+          // Must match how camera reads are normalized, or findActiveTareByPlate never hits.
+          const plate = normalizePlate(request.body.plate);
+          if (!plate) {
+            reply.code(400).send('Plate is empty after normalization');
+            return;
+          }
+          if (options.truckRepo.findTruckByPlate(plate)) {
+            reply.code(409).send('Another truck already uses this plate');
+            return;
+          }
           const actor = request.session.adminUsername!;
 
           const truck = options.truckRepo.transaction(() => {
@@ -429,6 +443,45 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           });
 
           reply.code(201).send({ truck: serializeTruck(truck, []) });
+        },
+      );
+
+      instance.patch<{ Params: TruckIdParams; Body: EditTruckPlateBody }>(
+        '/trucks/:id/plate',
+        { schema: { params: truckIdParamsSchema, body: editTruckPlateBodySchema }, preHandler: requireAuth },
+        async (request, reply) => {
+          const truckId = Number(request.params.id);
+          const existing = options.truckRepo.findTruckById(truckId);
+          if (!existing) {
+            reply.code(404).send('Truck not found');
+            return;
+          }
+
+          const { reason } = request.body;
+          // Must match how camera reads are normalized, or findActiveTareByPlate never hits.
+          const plate = normalizePlate(request.body.plate);
+          if (!plate) {
+            reply.code(400).send('Plate is empty after normalization');
+            return;
+          }
+          const duplicate = options.truckRepo.findTruckByPlate(plate);
+          if (duplicate && duplicate.id !== truckId) {
+            reply.code(409).send('Another truck already uses this plate');
+            return;
+          }
+
+          const actor = request.session.adminUsername!;
+          const truck = options.truckRepo.transaction(() => {
+            const updated = options.truckRepo.updateTruckPlate(truckId, plate);
+            options.truckRepo.appendAuditLog(truckId, actor, TRUCK_AUDIT_ACTIONS.PLATE_EDITED, {
+              reason,
+              before: { plate: existing.plate },
+              after: { plate },
+            });
+            return updated;
+          });
+
+          reply.send({ truck: serializeTruck(truck, options.truckRepo.listTruckConjuntos(truckId)) });
         },
       );
 

@@ -80,6 +80,54 @@ describe('TruckDetailPage', () => {
     });
   });
 
+  it('edits the truck plate with a reason and records it in the audit trail', async () => {
+    renderApp({ route: '/login' });
+    const user = await loginAsAdmin();
+
+    await openTruckDetail(user, 'IZS7I76');
+    await screen.findByRole('heading', { name: /truck izs7i76/i });
+
+    const form = screen.getByRole('form', { name: /edit truck plate/i });
+    const plateInput = within(form).getByLabelText(/^plate$/i);
+    await user.clear(plateInput);
+    await user.type(plateInput, 'ABC1D23');
+    await user.type(within(form).getByLabelText(/reason/i), 'Plate was mistyped at registration');
+    await user.click(within(form).getByRole('button', { name: /save plate/i }));
+
+    await screen.findByRole('heading', { name: /truck abc1d23/i });
+    expect(within(screen.getByTestId('truck-audit-log')).getByText(/plate edited/i)).toBeInTheDocument();
+  });
+
+  it('requires a reason before saving a plate edit', async () => {
+    renderApp({ route: '/login' });
+    const user = await loginAsAdmin();
+
+    await openTruckDetail(user, 'IZS7I76');
+    await screen.findByRole('heading', { name: /truck izs7i76/i });
+
+    const form = screen.getByRole('form', { name: /edit truck plate/i });
+    await user.click(within(form).getByRole('button', { name: /save plate/i }));
+
+    await within(form).findByText(/explain the change/i);
+  });
+
+  it('shows a clear error when the new plate already belongs to another truck', async () => {
+    renderApp({ route: '/login' });
+    const user = await loginAsAdmin();
+
+    await openTruckDetail(user, 'IZS7I76');
+    await screen.findByRole('heading', { name: /truck izs7i76/i });
+
+    const form = screen.getByRole('form', { name: /edit truck plate/i });
+    const plateInput = within(form).getByLabelText(/^plate$/i);
+    await user.clear(plateInput);
+    await user.type(plateInput, 'TQT1I39');
+    await user.type(within(form).getByLabelText(/reason/i), 'Testing a duplicate plate');
+    await user.click(within(form).getByRole('button', { name: /save plate/i }));
+
+    await within(form).findByText(/another internal truck already uses this plate/i);
+  });
+
   it('offers an already-shared conjunto in the dropdown when assigning to another truck', async () => {
     renderApp({ route: '/login' });
     const user = await loginAsAdmin();

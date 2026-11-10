@@ -183,6 +183,11 @@ export interface CreateTruckPayload {
   label?: string;
 }
 
+export interface EditTruckPlatePayload {
+  plate: string;
+  reason: string;
+}
+
 export interface CreateConjuntoPayload {
   name: string;
 }

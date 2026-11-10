@@ -101,6 +101,16 @@ export const createTruckBodySchema = {
   additionalProperties: false,
 } as const;
 
+export const editTruckPlateBodySchema = {
+  type: 'object',
+  properties: {
+    plate: { type: 'string', minLength: 1 },
+    reason: { type: 'string', minLength: 1 },
+  },
+  required: ['plate', 'reason'],
+  additionalProperties: false,
+} as const;
+
 export const createConjuntoBodySchema = {
   type: 'object',
   properties: {
@@ -195,6 +205,11 @@ export interface TruckConjuntoIdParams {
 export interface CreateTruckBody {
   plate: string;
   label?: string;
+}
+
+export interface EditTruckPlateBody {
+  plate: string;
+  reason: string;
 }
 
 export interface CreateConjuntoBody {
