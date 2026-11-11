@@ -16,7 +16,7 @@ const NAV_LINKS = [
 ] as const;
 
 function linkClass(isActive: boolean) {
-  return `rounded-md px-3 py-2 text-sm font-medium ${
+  return `block rounded-md px-3 py-2 text-sm font-medium ${
     isActive ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
   }`;
 }
@@ -27,25 +27,27 @@ export function AppShell() {
   const isAdmin = user?.role === 'admin';
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-6">
-            <span className="text-lg font-semibold text-slate-900">{t('nav.appName')}</span>
-            <nav className="flex gap-1">
-              {NAV_LINKS.filter((link) => isAdmin || !link.adminOnly).map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.to === '/'}
-                  className={({ isActive }) => linkClass(isActive)}
-                >
-                  {t(link.labelKey)}
-                </NavLink>
-              ))}
-            </nav>
-          </div>
-          <div className="flex items-center gap-4">
+    <div className="flex min-h-screen bg-slate-50">
+      <aside className="flex w-56 flex-shrink-0 flex-col border-r border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-4 text-lg font-semibold text-slate-900">
+          {t('nav.appName')}
+        </div>
+        <nav className="flex flex-col gap-1 p-3">
+          {NAV_LINKS.filter((link) => isAdmin || !link.adminOnly).map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              end={link.to === '/'}
+              className={({ isActive }) => linkClass(isActive)}
+            >
+              {t(link.labelKey)}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+      <div className="flex flex-1 flex-col">
+        <header className="border-b border-slate-200 bg-white">
+          <div className="flex items-center justify-end gap-4 px-4 py-3">
             <LanguageSwitcher />
             {/* `GET /status` is admin-only. */}
             {isAdmin && <HardwareStatusBadge />}
@@ -64,11 +66,13 @@ export function AppShell() {
               {t('nav.logout')}
             </button>
           </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">
-        <Outlet />
-      </main>
+        </header>
+        <main className="flex-1 px-4 py-6">
+          <div className="mx-auto max-w-6xl">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
