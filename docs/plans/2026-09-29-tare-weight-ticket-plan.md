@@ -1436,3 +1436,29 @@ merge per `CLAUDE.md`):
   can still be preempted by a readable one.
 - See `docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md` for
   the step-by-step record; delete that file once this entry is merged.
+
+### ANPR read confidence stored with every camera reading (2026-11-10)
+
+- **Motivation**: the entrance camera read **GGG8319** for truck
+  **IGG8319** (ticket #560 opened under the wrong plate, its exit became
+  ANOMALY #562; the same I→G misread happened on 2026-10-27, #121). The
+  camera's `confidenceLevel`/`plateCharBelieve` were parsed by
+  `anpr-xml.ts` but only used by `isReliablePlateRead` and then dropped, so
+  there was no way to tell how sure the camera was of that "G" — nor any
+  data to calibrate `MIN_CONFIDENCE_LEVEL` (80, still an unvalidated
+  starting value, §7 item 3).
+- **Decision**: `normalizeCameraPayload` now also returns `readQuality`
+  (`readPlate` — the normalized plate the camera read, kept **even when the
+  reliability filter blanks `rawPlate`**; `confidenceLevel`;
+  `plateCharBelieve` as a number array). It's passed through the session
+  service inputs and spread flat into **every** `camera_entrance`/
+  `camera_exit` `raw_events` payload (one `cameraRawPayload` helper in
+  `session-service.ts` for its 8 call sites, plus the route-level
+  post-release-debounce and scale-preemption discards). Queryable with
+  e.g. `json_extract(raw_payload, '$.confidenceLevel')`. No schema change;
+  rows before 2026-11-10 simply lack the keys.
+- **Not done (not requested)**: no ticket columns, no Admin UI display —
+  this is for offline analysis. Non-ANPR pushes (`diskerror`, `illaccess`)
+  carry no plate read and are unchanged.
+- See `docs/plans/2026-11-10-store-anpr-confidence-plan.md`; delete it once
+  this entry is merged.

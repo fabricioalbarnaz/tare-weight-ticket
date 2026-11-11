@@ -110,16 +110,26 @@ afterEach(() => {
  * omits `licensePlate` entirely, mirroring a camera event that fired with
  * no plate read at all.
  */
-function anprXml(options: { plate?: string | null; confidence?: number; deviceId?: string }): string {
-  const { plate = 'ABC1234', confidence = 96, deviceId = '88' } = options;
+function anprXml(options: { plate?: string | null; confidence?: number; deviceId?: string; charBelieve?: string }): string {
+  const { plate = 'ABC1234', confidence = 96, deviceId = '88', charBelieve } = options;
   return `<EventNotificationAlert version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
   <dateTime>2026-01-01T08:00:00.000Z</dateTime>
   <deviceID>${deviceId}</deviceID>
   <ANPR>
     ${plate === null ? '' : `<licensePlate>${plate}</licensePlate>`}
     <confidenceLevel>${confidence}</confidenceLevel>
+    ${charBelieve === undefined ? '' : `<plateCharBelieve>${charBelieve}</plateCharBelieve>`}
   </ANPR>
 </EventNotificationAlert>`;
+}
+
+/** Every camera raw event recorded so far, payload parsed. */
+function cameraRawEvents(): { source: string; payload: Record<string, unknown> }[] {
+  return (
+    sqlite
+      .prepare("select source, raw_payload from raw_events where source like 'camera_%' order by id")
+      .all() as { source: string; raw_payload: string }[]
+  ).map((row) => ({ source: row.source, payload: JSON.parse(row.raw_payload) as Record<string, unknown> }));
 }
 
 /**
@@ -145,7 +155,13 @@ async function buildMultipartBody(
 
 async function postCameraEvent(
   url: '/webhooks/camera/entrance' | '/webhooks/camera/exit',
-  options: { plate?: string | null; confidence?: number; deviceId?: string; includeExtraJpegPart?: boolean } = {},
+  options: {
+    plate?: string | null;
+    confidence?: number;
+    deviceId?: string;
+    charBelieve?: string;
+    includeExtraJpegPart?: boolean;
+  } = {},
 ) {
   const parts = [
     { fieldName: 'anpr.xml', content: anprXml(options), contentType: 'application/xml', filename: 'anpr.xml' },
@@ -503,6 +519,57 @@ describe('post-release debounce', () => {
     const response = await postEntrance({ plate: 'FRESH01' });
 
     expect(response.json().kind).toBe('ticket_opened');
+  });
+});
+
+// See docs/plans/2026-11-10-store-anpr-confidence-plan.md.
+describe('ANPR read confidence stored in camera raw events', () => {
+  const CHAR_BELIEVE = '41,98,97,99,99,99,99';
+  const EXPECTED_QUALITY = { confidenceLevel: 91, plateCharBelieve: [41, 98, 97, 99, 99, 99, 99] };
+
+  it('on a normal entrance and exit, linked to the ticket', async () => {
+    await postEntrance({ plate: 'GGG8319', confidence: 91, charBelieve: CHAR_BELIEVE });
+    await postExit({ plate: 'GGG8319', confidence: 91, charBelieve: CHAR_BELIEVE });
+
+    const events = cameraRawEvents();
+    expect(events.map((e) => e.source)).toEqual(['camera_entrance', 'camera_exit']);
+    for (const event of events) {
+      expect(event.payload).toMatchObject({ rawPlate: 'GGG8319', readPlate: 'GGG8319', ...EXPECTED_QUALITY });
+    }
+  });
+
+  it('on an anomaly (exit with no open ticket)', async () => {
+    await postExit({ plate: 'IGG8319', confidence: 91, charBelieve: CHAR_BELIEVE });
+
+    expect(cameraRawEvents()[0]?.payload).toMatchObject({ readPlate: 'IGG8319', ...EXPECTED_QUALITY });
+  });
+
+  it('on an unreadable read, keeping the plate the camera actually saw', async () => {
+    await postEntrance({ plate: 'GGG8319', confidence: 62, charBelieve: CHAR_BELIEVE });
+
+    expect(cameraRawEvents()[0]?.payload).toMatchObject({
+      rawPlate: '',
+      readPlate: 'GGG8319',
+      confidenceLevel: 62,
+      plateCharBelieve: [41, 98, 97, 99, 99, 99, 99],
+    });
+  });
+
+  it('on a reading discarded by the post-release debounce', async () => {
+    await postEntrance({ plate: 'BOUNCE1' });
+    await postExit({ plate: 'BOUNCE1' });
+    await postExit({ plate: 'TRAILER9', confidence: 91, charBelieve: CHAR_BELIEVE });
+
+    const discarded = cameraRawEvents().find((e) => e.payload.discarded === 'post_release_debounce');
+    expect(discarded?.payload).toMatchObject({ readPlate: 'TRAILER9', ...EXPECTED_QUALITY });
+  });
+
+  it('on a reading discarded by scale-read preemption', async () => {
+    nextScaleReading = { weightKg: null, weightCaptureFailed: true, failureReason: 'preempted', waitedMs: 10, attemptsUsed: 1 };
+    await postEntrance({ plate: 'PRE0001', confidence: 91, charBelieve: CHAR_BELIEVE });
+
+    const discarded = cameraRawEvents().find((e) => e.payload.discarded === 'preempted_by_new_plate');
+    expect(discarded?.payload).toMatchObject({ readPlate: 'PRE0001', ...EXPECTED_QUALITY });
   });
 });
 

@@ -35,13 +35,14 @@ describe('isReliablePlateRead', () => {
 });
 
 describe('normalizeCameraPayload', () => {
-  it('maps a reliable read through to rawPlate/cameraId/timestamp', () => {
+  it('maps a reliable read through to rawPlate/cameraId/timestamp, with the camera read quality', () => {
     const result = normalizeCameraPayload(makeEvent());
 
     expect(result).toEqual({
       rawPlate: 'ABC1234',
       cameraId: '88',
       timestamp: new Date('2026-01-01T08:00:00.000Z'),
+      readQuality: { readPlate: 'ABC1234', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 99, 99, 99, 99] },
     });
   });
 
@@ -49,6 +50,19 @@ describe('normalizeCameraPayload', () => {
     const result = normalizeCameraPayload(makeEvent({ confidenceLevel: 50 }));
 
     expect(result.rawPlate).toBe('');
+  });
+
+  it('keeps what the camera read in readQuality even when the read is judged unreadable', () => {
+    const result = normalizeCameraPayload(
+      makeEvent({ licensePlate: 'ggg-8319', confidenceLevel: 62, plateCharBelieve: [41, 98, 97, 99, 99, 99, 99] }),
+    );
+
+    expect(result.rawPlate).toBe('');
+    expect(result.readQuality).toEqual({
+      readPlate: 'GGG8319',
+      confidenceLevel: 62,
+      plateCharBelieve: [41, 98, 97, 99, 99, 99, 99],
+    });
   });
 
   it('blanks rawPlate when the plate is shorter than expected (likely truncated read)', () => {

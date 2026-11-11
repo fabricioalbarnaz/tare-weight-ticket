@@ -1,5 +1,6 @@
 import { normalizePlate } from '../domain/plate.js';
 import type { ScaleReadFailureReason } from '../scale/types.js';
+import type { CameraReadQuality } from '../camera/normalize.js';
 import type { TruckRepository } from '../trucks/repository.js';
 import type { Ticket, TicketRepository } from './repository.js';
 
@@ -21,6 +22,8 @@ export interface EntranceReadingInput {
   cameraId: string;
   /** Camera-reported event time — forensic only, see `weighingFinishedAt`. */
   timestamp: Date;
+  /** Camera's own read confidence — stored in the camera raw event for analysis only. */
+  readQuality?: CameraReadQuality;
   /**
    * Server clock time right after the scale read settled (or gave up) —
    * i.e. when the weighing itself finished, not when the truck crossed
@@ -52,6 +55,8 @@ export interface ExitReadingInput {
   cameraId: string;
   /** Camera-reported event time — forensic only, see `weighingFinishedAt`. */
   timestamp: Date;
+  /** Camera's own read confidence — stored in the camera raw event for analysis only. */
+  readQuality?: CameraReadQuality;
   /**
    * Server clock time right after the scale read settled (or gave up) —
    * i.e. when the weighing itself finished, not when the truck crossed
@@ -79,17 +84,34 @@ export interface SessionService {
   handleExitReading(input: ExitReadingInput): ExitResult;
 }
 
+/**
+ * The `camera_entrance`/`camera_exit` raw-event payload for a reading:
+ * the plate/camera/timestamp plus the camera's read-quality fields
+ * (`readPlate`, `confidenceLevel`, `plateCharBelieve`), flat so they're
+ * queryable with `json_extract` — see
+ * docs/plans/2026-11-10-store-anpr-confidence-plan.md. `plate` is omitted
+ * for an unreadable read.
+ */
+function cameraRawPayload(
+  input: EntranceReadingInput | ExitReadingInput,
+  plate?: string,
+): Record<string, unknown> {
+  return {
+    rawPlate: input.rawPlate,
+    ...(plate !== undefined ? { plate } : {}),
+    cameraId: input.cameraId,
+    timestamp: input.timestamp,
+    ...input.readQuality,
+  };
+}
+
 export function createSessionService(repo: TicketRepository, truckRepo: TruckRepository): SessionService {
   return {
     handleEntranceReading(input) {
       const plate = normalizePlate(input.rawPlate);
 
       if (plate === '') {
-        repo.recordRawEvent('camera_entrance', {
-          rawPlate: input.rawPlate,
-          cameraId: input.cameraId,
-          timestamp: input.timestamp,
-        });
+        repo.recordRawEvent('camera_entrance', cameraRawPayload(input));
         return { kind: 'plate_unreadable' };
       }
 
@@ -124,7 +146,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
           });
           repo.recordRawEvent(
             'camera_entrance',
-            { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+            cameraRawPayload(input, plate),
             ticket.id,
           );
           repo.recordRawEvent(
@@ -174,7 +196,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
         });
         repo.recordRawEvent(
           'camera_entrance',
-          { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+          cameraRawPayload(input, plate),
           ticket.id,
         );
         repo.recordRawEvent(
@@ -197,11 +219,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
       const plate = normalizePlate(input.rawPlate);
 
       if (plate === '') {
-        repo.recordRawEvent('camera_exit', {
-          rawPlate: input.rawPlate,
-          cameraId: input.cameraId,
-          timestamp: input.timestamp,
-        });
+        repo.recordRawEvent('camera_exit', cameraRawPayload(input));
         return { kind: 'plate_unreadable' };
       }
 
@@ -236,7 +254,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
           );
           repo.recordRawEvent(
             'camera_exit',
-            { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+            cameraRawPayload(input, plate),
             ticket.id,
           );
           repo.recordRawEvent(
@@ -272,7 +290,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             });
             repo.recordRawEvent(
               'camera_exit',
-              { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+              cameraRawPayload(input, plate),
               existing.id,
             );
             repo.recordRawEvent(
@@ -300,16 +318,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             cameraId: input.cameraId,
             attemptsUsed: input.attemptsUsed,
           });
-          repo.recordRawEvent(
-            'camera_exit',
-            {
-              rawPlate: input.rawPlate,
-              plate,
-              cameraId: input.cameraId,
-              timestamp: input.timestamp,
-            },
-            ticket.id,
-          );
+          repo.recordRawEvent('camera_exit', cameraRawPayload(input, plate), ticket.id);
           repo.recordRawEvent(
             'scale',
             {
@@ -338,7 +347,7 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
         });
         repo.recordRawEvent(
           'camera_exit',
-          { rawPlate: input.rawPlate, plate, cameraId: input.cameraId, timestamp: input.timestamp },
+          cameraRawPayload(input, plate),
           ticket.id,
         );
         repo.recordRawEvent(

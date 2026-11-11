@@ -138,6 +138,7 @@ function checkPostReleaseDebounce(
     triggeredAt,
     discarded: 'post_release_debounce',
     msSinceLastExit,
+    ...event.readQuality,
   });
   reply.send({ kind: 'reading_debounced' });
   return true;
@@ -176,6 +177,7 @@ function checkPreempted(
     discarded: 'preempted_by_new_plate',
     waitedMs: scaleResult.waitedMs,
     attemptsUsed: scaleResult.attemptsUsed,
+    ...event.readQuality,
   });
   reply.send({ kind: 'reading_preempted' });
   return true;
@@ -218,6 +220,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
+      readQuality: event.readQuality,
       weighingFinishedAt,
       weightKg,
       weightCaptureFailed,
@@ -303,6 +306,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       rawPlate: event.rawPlate,
       cameraId: event.cameraId,
       timestamp: event.timestamp,
+      readQuality: event.readQuality,
       weighingFinishedAt,
       weightKg,
       weightCaptureFailed,
