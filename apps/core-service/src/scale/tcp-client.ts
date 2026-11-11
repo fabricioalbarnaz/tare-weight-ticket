@@ -36,6 +36,14 @@ interface ActiveRead {
   meta: Record<string, unknown>;
 }
 
+/** One `readStableWeight` call, from the moment it's queued until it resolves — tracked so a newer plate can preempt it (see ScaleReadContext.plateKey). */
+interface ReadJob {
+  plateKey: string;
+  preemptedBy: string | null;
+  /** Set only while this job's readOne() is waiting on a frame: resolves that wait immediately as preempted. */
+  abort: (() => void) | null;
+}
+
 const KEEP_ALIVE_DELAY_MS = 10_000;
 
 const noopLogger: ScaleLogger = {
@@ -74,6 +82,14 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     weightKg: null,
     weightCaptureFailed: true,
   });
+  // Every job queued or running, so a newer plate can preempt them.
+  const pendingJobs = new Set<ReadJob>();
+
+  function preempt(job: ReadJob, byPlateKey: string): void {
+    if (job.preemptedBy !== null) return;
+    job.preemptedBy = byPlateKey;
+    job.abort?.();
+  }
 
   function failAllWaiters(): void {
     const pending = waiters;
@@ -149,7 +165,24 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
     return connectPromise;
   }
 
-  async function readOne(context: ScaleReadContext | undefined, attempt: number): Promise<ScaleReadResult> {
+  function preemptedResult(
+    job: ReadJob,
+    log: ScaleLogger,
+    meta: Record<string, unknown>,
+    waitedMs: number,
+  ): ScaleReadResult {
+    log.info(
+      { ...meta, waitedMs, failureReason: 'preempted', preemptedByPlate: job.preemptedBy },
+      'scale read preempted: a newer reading for a different plate took over the scale',
+    );
+    return { weightKg: null, weightCaptureFailed: true, failureReason: 'preempted', waitedMs };
+  }
+
+  async function readOne(
+    context: ScaleReadContext | undefined,
+    attempt: number,
+    job: ReadJob,
+  ): Promise<ScaleReadResult> {
     const log = context?.logger ?? logger;
     const meta = {
       ...endpoint,
@@ -159,6 +192,8 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
       stabilityRetryCount,
     };
     const startedAt = Date.now();
+
+    if (job.preemptedBy !== null) return preemptedResult(job, log, meta, 0);
 
     try {
       await connect();
@@ -173,11 +208,15 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
       return { weightKg: null, weightCaptureFailed: true, failureReason, waitedMs };
     }
 
+    // Preempted while the connection was being established.
+    if (job.preemptedBy !== null) return preemptedResult(job, log, meta, Date.now() - startedAt);
+
     activeRead = { log, meta };
     try {
       return await new Promise<ScaleReadResult>((resolve) => {
         const waiter: Waiter = (frame) => {
           clearTimeout(timer);
+          job.abort = null;
           const waitedMs = Date.now() - startedAt;
 
           if (frame === null) {
@@ -194,6 +233,7 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
         };
 
         const timer = setTimeout(() => {
+          job.abort = null;
           waiters = waiters.filter((pending) => pending !== waiter);
           // Force a reconnect on the next read: otherwise a frame that settles
           // just after this timeout could answer a later, unrelated read.
@@ -203,24 +243,35 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
           resolve({ weightKg: null, weightCaptureFailed: true, failureReason: 'stability_timeout', waitedMs });
         }, options.stabilityTimeoutMs);
 
+        // No teardown here, unlike the stability-timeout path: the read that
+        // preempted this one is for the truck physically on the platform
+        // now, so the next stable frame legitimately belongs to it.
+        job.abort = () => {
+          job.abort = null;
+          clearTimeout(timer);
+          waiters = waiters.filter((pending) => pending !== waiter);
+          resolve(preemptedResult(job, log, meta, Date.now() - startedAt));
+        };
+
         waiters.push(waiter);
       });
     } finally {
+      job.abort = null;
       activeRead = null;
     }
   }
 
-  async function readWithRetries(context?: ScaleReadContext): Promise<ScaleReadResult> {
+  async function readWithRetries(context: ScaleReadContext | undefined, job: ReadJob): Promise<ScaleReadResult> {
     let result: ScaleReadResult = { weightKg: null, weightCaptureFailed: true };
     let totalWaitedMs = 0;
     let attemptsUsed = 0;
 
     for (let attempt = 1; attempt <= stabilityRetryCount; attempt += 1) {
-      result = await readOne(context, attempt);
+      result = await readOne(context, attempt, job);
       totalWaitedMs += result.waitedMs ?? 0;
       attemptsUsed = attempt;
 
-      if (!result.weightCaptureFailed) break;
+      if (!result.weightCaptureFailed || result.failureReason === 'preempted') break;
     }
 
     return { ...result, waitedMs: totalWaitedMs, attemptsUsed };
@@ -228,8 +279,19 @@ export function createTcpScaleClient(options: ScaleClientOptions): ScaleClient {
 
   return {
     readStableWeight(context?: ScaleReadContext): Promise<ScaleReadResult> {
-      const run = (): Promise<ScaleReadResult> => readWithRetries(context);
-      const result = readQueue.then(run, run);
+      const job: ReadJob = { plateKey: context?.plateKey ?? '', preemptedBy: null, abort: null };
+
+      // A readable plate takes over the scale from every older read for a
+      // different plate, whether it's the one running now or still queued.
+      if (job.plateKey !== '') {
+        for (const other of pendingJobs) {
+          if (other.plateKey !== job.plateKey) preempt(other, job.plateKey);
+        }
+      }
+      pendingJobs.add(job);
+
+      const run = (): Promise<ScaleReadResult> => readWithRetries(context, job);
+      const result = readQueue.then(run, run).finally(() => pendingJobs.delete(job));
       readQueue = result;
       return result;
     },

@@ -261,6 +261,129 @@ describe('createTcpScaleClient', () => {
     });
   });
 
+  // See docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md.
+  describe('preemption by a newer plate', () => {
+    async function startClient(overrides: { stabilityTimeoutMs?: number; stabilityRetryCount?: number; logger?: ScaleLogger } = {}) {
+      server = await startMockScaleServer();
+      client = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: server.port,
+        stabilityTimeoutMs: overrides.stabilityTimeoutMs ?? 5000,
+        stabilityRetryCount: overrides.stabilityRetryCount,
+        createParser: createPlaceholderFrameParser,
+        logger: overrides.logger,
+      });
+      return { server, client };
+    }
+
+    it('resolves the active read as preempted right away, without reconnecting, and gives the next stable frame to the new plate', async () => {
+      const { server, client } = await startClient();
+
+      const readA = client.readStableWeight({ plateKey: 'AAA1111' });
+      await server.waitForConnection();
+      server.send('US,19500');
+
+      const startedAt = Date.now();
+      const readB = client.readStableWeight({ plateKey: 'BBB2222' });
+      await expect(readA).resolves.toMatchObject({
+        weightKg: null,
+        weightCaptureFailed: true,
+        failureReason: 'preempted',
+        attemptsUsed: 1,
+      });
+      expect(Date.now() - startedAt).toBeLessThan(1000);
+
+      server.send('ST,53300');
+      await expect(readB).resolves.toMatchObject({ weightKg: 53300, weightCaptureFailed: false, attemptsUsed: 1 });
+      expect(server.connectionCount).toBe(1);
+    });
+
+    it('stops a retrying read immediately instead of running its remaining attempts', async () => {
+      const { server, client } = await startClient({ stabilityTimeoutMs: 300, stabilityRetryCount: 3 });
+
+      const readA = client.readStableWeight({ plateKey: 'AAA1111' });
+      // Attempt 1 times out with no frame; attempt 2 reconnects.
+      await server.waitForConnection(2);
+
+      const readB = client.readStableWeight({ plateKey: 'BBB2222' });
+      await expect(readA).resolves.toMatchObject({ failureReason: 'preempted', attemptsUsed: 2 });
+
+      server.send('ST,40000');
+      await expect(readB).resolves.toMatchObject({ weightKg: 40000, weightCaptureFailed: false });
+      expect(server.connectionCount).toBe(2);
+    });
+
+    it('also preempts older reads still waiting in the queue, including unreadable ones', async () => {
+      const { server, client } = await startClient();
+
+      const readA = client.readStableWeight({ plateKey: 'AAA1111' });
+      await server.waitForConnection();
+      const readUnreadable = client.readStableWeight({ plateKey: '' });
+      const readB = client.readStableWeight({ plateKey: 'BBB2222' });
+
+      await expect(readA).resolves.toMatchObject({ failureReason: 'preempted' });
+      await expect(readUnreadable).resolves.toMatchObject({ failureReason: 'preempted' });
+
+      server.send('ST,30000');
+      await expect(readB).resolves.toMatchObject({ weightKg: 30000, weightCaptureFailed: false });
+    });
+
+    it('preempts an active read for an unreadable plate', async () => {
+      const { server, client } = await startClient();
+
+      const readUnreadable = client.readStableWeight({ plateKey: '' });
+      await server.waitForConnection();
+      const readB = client.readStableWeight({ plateKey: 'BBB2222' });
+
+      await expect(readUnreadable).resolves.toMatchObject({ failureReason: 'preempted' });
+      server.send('ST,30000');
+      await expect(readB).resolves.toMatchObject({ weightKg: 30000, weightCaptureFailed: false });
+    });
+
+    it('does not preempt when the new reading is for the same plate — both are served in order', async () => {
+      const { server, client } = await startClient();
+
+      const first = client.readStableWeight({ plateKey: 'AAA1111' });
+      await server.waitForConnection();
+      const second = client.readStableWeight({ plateKey: 'AAA1111' });
+
+      server.send('ST,20000');
+      await expect(first).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
+      server.send('ST,20010');
+      await expect(second).resolves.toMatchObject({ weightKg: 20010, weightCaptureFailed: false });
+    });
+
+    it('does not preempt when the new reading has an unreadable plate', async () => {
+      const { server, client } = await startClient();
+
+      const readA = client.readStableWeight({ plateKey: 'AAA1111' });
+      await server.waitForConnection();
+      const readUnreadable = client.readStableWeight({ plateKey: '' });
+
+      server.send('ST,20000');
+      await expect(readA).resolves.toMatchObject({ weightKg: 20000, weightCaptureFailed: false });
+      server.send('ST,15000');
+      await expect(readUnreadable).resolves.toMatchObject({ weightKg: 15000, weightCaptureFailed: false });
+    });
+
+    it('logs the preemption at info level with the preempting plate', async () => {
+      const { logger, calls } = createCapturingLogger();
+      const { server, client } = await startClient({ logger });
+
+      const readA = client.readStableWeight({ plateKey: 'AAA1111', plate: 'AAA1111', direction: 'exit' });
+      await server.waitForConnection();
+      void client.readStableWeight({ plateKey: 'BBB2222' });
+      await readA;
+
+      const preemptLog = calls.find((c) => c.obj.failureReason === 'preempted');
+      expect(preemptLog).toMatchObject({
+        level: 'info',
+        obj: { plate: 'AAA1111', direction: 'exit', preemptedByPlate: 'BBB2222' },
+      });
+      expect(calls.some((c) => c.level === 'warn')).toBe(false);
+    });
+  });
+
   describe('getStatus', () => {
     it('reports disconnected with no lastSeenAt before any read', () => {
       client = createTcpScaleClient({

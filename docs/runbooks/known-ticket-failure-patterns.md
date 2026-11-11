@@ -227,7 +227,20 @@ visible trace that anything unusual happened — unlike the 2026-10-31
 victim (which became a loud `ANOMALY`), this victim looks like an
 unremarkable, fast (`attemptsUsed: 1`), successful entrance.
 
-**Suggested fix (not implemented, flagged here for a decision/plan):**
+**Fixed (2026-11-10) — gap (a) only:** the scale client now preempts an
+in-progress (or queued) read as soon as a camera reading with a different,
+readable plate arrives — see master plan §5 "Scale read preemption" and
+§11. Replayed against this exact scenario in `camera/routes.test.ts`:
+IRR7J60's entrance at 17:44:37 would have stopped MFX8B10's exit retries
+immediately (`{ kind: 'reading_preempted' }`, a `raw_events` row flagged
+`discarded: 'preempted_by_new_plate'`, no close, no print), and the
+53,300 kg reading would have gone only to IRR7J60. Note the trade-off: the
+preempted exit leg is discarded, so ticket #475 would have stayed `OPEN`
+with no exit — look for that `raw_events` flag when investigating an exit
+that "never happened". Gap (b) (stale `OPEN` ticket silently overwritten)
+and items 2–3 below are still open.
+
+**Suggested fix (original, partly superseded by the note above):**
 1. The existing 2026-10-31 mitigation (`suspectWeight` badge on
    `attemptsUsed > 1`) already would have flagged ticket #475 in the
    dashboard — confirm it's actually visible there is the first, zero-code

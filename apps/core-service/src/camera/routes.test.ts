@@ -8,7 +8,10 @@ import { buildApp } from '../app.js';
 import { createDb, type Db } from '../db/client.js';
 import { createTicketRepository, type TicketRepository } from '../tickets/repository.js';
 import { createTruckRepository, type TruckRepository } from '../trucks/repository.js';
-import type { ScaleClient, ScaleReadResult } from '../scale/types.js';
+import type { ScaleClient, ScaleReadContext, ScaleReadResult } from '../scale/types.js';
+import { createTcpScaleClient } from '../scale/tcp-client.js';
+import { createPlaceholderFrameParser } from '../scale/placeholder-frame-parser.js';
+import { startMockScaleServer, type MockScaleServer } from '../scale/mock-scale-server.js';
 import type { DriverSignalAdapter, DriverSignalDirection } from '../driver-signal/types.js';
 import type { PrintClient } from '../printing/print-client.js';
 
@@ -23,6 +26,8 @@ let nextScaleReading: ScaleReadResult;
 let scaleReadDelayMs: number;
 let driverSignalCalls: DriverSignalDirection[];
 let printCalls: number;
+/** Every context the fake scale client was called with, in order. */
+let scaleContexts: (ScaleReadContext | undefined)[];
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,7 +35,8 @@ function delay(ms: number): Promise<void> {
 
 function createFakeScaleClient(): ScaleClient {
   return {
-    async readStableWeight() {
+    async readStableWeight(context) {
+      scaleContexts.push(context);
       if (scaleReadDelayMs > 0) await delay(scaleReadDelayMs);
       return nextScaleReading;
     },
@@ -75,6 +81,7 @@ beforeEach(() => {
   scaleReadDelayMs = 0;
   driverSignalCalls = [];
   printCalls = 0;
+  scaleContexts = [];
   app = buildApp({
     db,
     scaleClient: createFakeScaleClient(),
@@ -496,6 +503,169 @@ describe('post-release debounce', () => {
     const response = await postEntrance({ plate: 'FRESH01' });
 
     expect(response.json().kind).toBe('ticket_opened');
+  });
+});
+
+// See docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md.
+describe('scale read preempted by a newer plate', () => {
+  function findPreemptedRawEvent() {
+    return repo
+      .listUnresolvedEvents({})
+      .items.find((e) => (JSON.parse(e.rawPayload) as { discarded?: string }).discarded === 'preempted_by_new_plate');
+  }
+
+  it('passes the normalized plate as the scale plateKey, and an empty key for an unreadable plate', async () => {
+    // Unreadable read before the exit: the exit closes a ticket, which would
+    // put any later reading inside the post-release debounce window.
+    await postEntrance({ plate: 'KEY0001' });
+    await postEntrance({ plate: null });
+    await postExit({ plate: 'KEY0001' });
+
+    expect(scaleContexts.map((c) => c?.plateKey)).toEqual(['KEY0001', '', 'KEY0001']);
+  });
+
+  for (const direction of ['entrance', 'exit'] as const) {
+    it(`discards a preempted ${direction} reading entirely: no ticket, signal or print — only a raw event`, async () => {
+      if (direction === 'exit') {
+        await postEntrance({ plate: 'PRE0001' });
+        driverSignalCalls = [];
+      }
+      nextScaleReading = { weightKg: null, weightCaptureFailed: true, failureReason: 'preempted', waitedMs: 1200, attemptsUsed: 1 };
+
+      const response = direction === 'entrance' ? await postEntrance({ plate: 'PRE0001' }) : await postExit({ plate: 'PRE0001' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ kind: 'reading_preempted' });
+      expect(driverSignalCalls).toEqual([]);
+      expect(printCalls).toBe(0);
+      const tickets = repo.listTickets({}).items;
+      if (direction === 'entrance') {
+        expect(tickets).toHaveLength(0);
+      } else {
+        // The earlier entrance's ticket is untouched: still open, no exit leg.
+        expect(tickets).toHaveLength(1);
+        const ticket = repo.findById(tickets[0]!.id);
+        expect(ticket?.status).toBe('OPEN');
+        expect(ticket?.exitWeightKg).toBeNull();
+        expect(ticket?.exitCaptureFailed).toBe(false);
+      }
+      const raw = findPreemptedRawEvent();
+      expect(raw?.source).toBe(direction === 'entrance' ? 'camera_entrance' : 'camera_exit');
+      expect(JSON.parse(raw!.rawPayload)).toMatchObject({ rawPlate: 'PRE0001', waitedMs: 1200, attemptsUsed: 1 });
+    });
+  }
+
+  describe('end to end with the real TCP scale client', () => {
+    let scaleServer: MockScaleServer;
+    let realApp: FastifyInstance;
+    let realClient: ScaleClient;
+    let readCalls: number;
+
+    beforeEach(async () => {
+      scaleServer = await startMockScaleServer();
+      const tcpClient = createTcpScaleClient({
+        host: '127.0.0.1',
+        port: scaleServer.port,
+        stabilityTimeoutMs: 5000,
+        stabilityRetryCount: 3,
+        createParser: createPlaceholderFrameParser,
+      });
+      readCalls = 0;
+      realClient = {
+        ...tcpClient,
+        readStableWeight(context) {
+          readCalls += 1;
+          return tcpClient.readStableWeight(context);
+        },
+      };
+      realApp = buildApp({
+        db,
+        scaleClient: realClient,
+        driverSignalAdapter: createFakeDriverSignalAdapter(),
+        printClient: createFakePrintClient(),
+        adminSessionSecret: 'a'.repeat(32),
+      });
+    });
+
+    afterEach(async () => {
+      realClient.close();
+      await realApp.close();
+      await scaleServer.close();
+    });
+
+    async function inject(url: '/webhooks/camera/entrance' | '/webhooks/camera/exit', plate: string) {
+      const { body, contentType } = await buildMultipartBody([
+        { fieldName: 'anpr.xml', content: anprXml({ plate }), contentType: 'application/xml', filename: 'anpr.xml' },
+      ]);
+      return realApp.inject({ method: 'POST', url, headers: { 'content-type': contentType }, payload: body });
+    }
+
+    async function waitForReadCalls(count: number) {
+      const deadline = Date.now() + 3000;
+      while (readCalls < count) {
+        if (Date.now() > deadline) throw new Error(`scale read #${count} never started`);
+        await delay(10);
+      }
+      // Let the read actually reach its wait on the connection.
+      await delay(50);
+    }
+
+    it('MFX8B10/IRR7J60 scenario: a new entrance preempts a stalled exit, which no longer steals the new truck\'s weight', async () => {
+      // MFX8B10 enters normally.
+      const entering = inject('/webhooks/camera/entrance', 'MFX8B10');
+      await scaleServer.waitForConnection();
+      await waitForReadCalls(1);
+      scaleServer.send('ST,54280');
+      expect((await entering).json().kind).toBe('ticket_opened');
+
+      // Its exit read stalls: the truck drives off, the weight never settles.
+      const exiting = inject('/webhooks/camera/exit', 'MFX8B10');
+      await waitForReadCalls(2);
+      scaleServer.send('US,19500');
+      scaleServer.send('US,0');
+
+      // IRR7J60's entrance arrives: it takes the scale over.
+      const nextEntering = inject('/webhooks/camera/entrance', 'IRR7J60');
+      const exitResponse = await exiting;
+      expect(exitResponse.json()).toEqual({ kind: 'reading_preempted' });
+
+      await waitForReadCalls(3);
+      scaleServer.send('ST,53300');
+      const nextResponse = await nextEntering;
+      expect(nextResponse.json().kind).toBe('ticket_opened');
+
+      // MFX8B10's ticket was not closed with IRR7J60's weight.
+      const mfx = repo.findOpenByPlate('MFX8B10');
+      expect(mfx?.status).toBe('OPEN');
+      expect(mfx?.exitWeightKg).toBeNull();
+      expect(printCalls).toBe(0);
+      expect(repo.findOpenByPlate('IRR7J60')?.entryWeightKg).toBe(53300);
+      expect(findPreemptedRawEvent()?.source).toBe('camera_exit');
+    });
+
+    it('an unreadable plate arriving mid-capture does not preempt it', async () => {
+      const entering = inject('/webhooks/camera/entrance', 'KEEP001');
+      await scaleServer.waitForConnection();
+      await waitForReadCalls(1);
+
+      const unreadable = (async () => {
+        const { body, contentType } = await buildMultipartBody([
+          { fieldName: 'anpr.xml', content: anprXml({ plate: null }), contentType: 'application/xml', filename: 'anpr.xml' },
+        ]);
+        return realApp.inject({ method: 'POST', url: '/webhooks/camera/entrance', headers: { 'content-type': contentType }, payload: body });
+      })();
+      await waitForReadCalls(2);
+
+      scaleServer.send('ST,21000');
+      expect((await entering).json().kind).toBe('ticket_opened');
+      expect(repo.findOpenByPlate('KEEP001')?.entryWeightKg).toBe(21000);
+
+      // The queued unreadable read only starts once KEEP001's has settled.
+      await delay(100);
+      scaleServer.send('ST,21000');
+      expect((await unreadable).json().kind).toBe('plate_unreadable');
+      expect(findPreemptedRawEvent()).toBeUndefined();
+    });
   });
 });
 

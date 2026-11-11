@@ -157,6 +157,15 @@ session keeps only the user id and re-reads the user on every request, so
 deactivation applies immediately. `db:seed-admin` remains the
 locked-out-install recovery path. See master plan §11 "User management".
 
+**Scale read preemption (2026-11-10):** a camera reading with a readable
+plate different from the one the scale is currently capturing (or has
+queued) now stops that older capture immediately and discards its reading
+entirely (no ticket/signal/print — only a `raw_events` row flagged
+`preempted_by_new_plate`), then weighs the new plate. Unreadable plates and
+same-plate re-reads never preempt. Prevents the "exit retry loop steals the
+next truck's weight" pattern in `docs/runbooks/known-ticket-failure-patterns.md`.
+See master plan §5/§11.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

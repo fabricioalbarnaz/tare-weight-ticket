@@ -255,6 +255,21 @@ the Admin UI for context.
   bounds the automatic wait explicitly (retry count × timeout, ~90s worst
   case at the new defaults) and, past that bound, accepts that a truck may
   need manual operator release instead of guessing at a weight.
+  (2026-11-10: this install's `.env` raises the per-attempt timeout to
+  45s, so its worst case is now ~135s — still bounded, and cut short by
+  the preemption rule below whenever the next truck's plate arrives.)
+- **Scale read preemption by a newer plate (2026-11-10):** the scale is one
+  physical platform, so a camera reading with a **readable** plate that
+  differs from the plate of a scale read still in progress (or still
+  queued) means that older truck is no longer the one being weighed. Every
+  such older read stops at once (no remaining retries) and its camera
+  reading is **discarded entirely** — no ticket created/updated, no driver
+  signal, no print; only a `raw_events` row flagged `discarded:
+  'preempted_by_new_plate'` and a `{ kind: 'reading_preempted' }`
+  webhook reply. The new plate's read starts immediately on the same
+  connection. An unreadable plate never preempts (camera noise must not
+  kill a legitimate weighing), and a re-read of the same plate doesn't
+  either (existing last-write-wins rules apply). See §11.
 - **Print** happens automatically exactly once per ticket transition into
   `CLOSED`, tracked via `printed_at` to avoid duplicate prints from retries;
   Admin UI can force a reprint explicitly.
@@ -1377,3 +1392,47 @@ merge per `CLAUDE.md`):
 - **Not built (possible follow-up)**: no audit trail for user-management
   actions themselves (who created or deactivated whom). No such table
   existed before, and the user didn't ask for one.
+
+### Scale read preemption by a newer plate (2026-11-10)
+
+- **Incident that motivated this**: the "exit retry loop outlives the
+  truck" pattern in `docs/runbooks/known-ticket-failure-patterns.md`
+  (MFX8B10 / IRR7J60, 2026-11-07). MFX8B10's exit read kept retrying after
+  the truck had driven off; IRR7J60 drove on for its entrance, its webhook
+  queued behind the retry loop on the FIFO scale client, and MFX8B10's 3rd
+  attempt captured IRR7J60's settled weight — closing and auto-printing
+  MFX8B10's ticket with a 980 kg net weight. The 2026-10-31
+  `suspectWeight` badge only *flags* that after the fact; this change
+  prevents it.
+- **Decision (user request, 2026-11-10)**: when a camera reading with a
+  readable plate arrives while the scale is capturing for a different
+  plate, discard that capture and start a fresh one for the new plate.
+  Implemented in the scale client, not the routes: `ScaleReadContext`
+  gained `plateKey` (the already-normalized plate, `''` when unreadable)
+  and `ScaleReadFailureReason` gained `'preempted'`. `readStableWeight`
+  tracks every queued/running job; a new job with a non-empty key marks
+  every older job with a different key as preempted — a running one
+  resolves immediately (its waiter is removed, no remaining retries), a
+  queued one resolves as preempted as soon as its turn comes, without
+  touching the scale. No connection teardown on preemption (unlike the
+  stability-timeout path): the next stable frame legitimately belongs to
+  the truck now on the platform.
+- **The preempted reading is discarded entirely** — the user explicitly
+  chose this over "record it as a failed capture leg for an admin to
+  fix". `camera/routes.ts` (`checkPreempted`) returns before the session
+  service: no ticket created/updated, no driver signal, no print, no
+  weighing-result event (the live panel's `plate-received` for the new
+  plate has already fired; a late result for the old plate would overwrite
+  it on screen). Only a `raw_events` row (`discarded:
+  'preempted_by_new_plate'`, with `waitedMs`/`attemptsUsed`) and a
+  `warn` log line remain. **Accepted risk**: if the preempted truck was
+  real (e.g. a genuine exit whose weight just hadn't settled when the next
+  truck's plate was read), that leg disappears with no ticket trace — only
+  visible in `raw_events`/logs, and the ticket stays `OPEN` (exit) or is
+  never created (entrance).
+- **Not a trigger**: an unreadable plate (camera noise must not kill a
+  legitimate weighing) and a re-read of the same plate (queues as before;
+  existing entrance last-write-wins rules apply). Older *unreadable* reads
+  can still be preempted by a readable one.
+- See `docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md` for
+  the step-by-step record; delete that file once this entry is merged.

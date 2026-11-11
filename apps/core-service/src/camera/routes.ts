@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { ScaleClient } from '../scale/types.js';
+import type { ScaleClient, ScaleReadResult } from '../scale/types.js';
 import type { DriverSignalAdapter } from '../driver-signal/types.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { EntranceResult, ExitResult, SessionService } from '../tickets/session-service.js';
@@ -143,6 +143,44 @@ function checkPostReleaseDebounce(
   return true;
 }
 
+/**
+ * Discards a reading whose scale capture was preempted by a newer reading
+ * for a different plate (the scale is one platform, so the new plate means
+ * this truck is no longer the one being weighed) — see
+ * docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md. Discarded
+ * entirely by design: no ticket, no driver signal, no print, and no
+ * weighing-result event (the live panel already switched to the new
+ * plate; a late result for this one would overwrite it). Only a raw event
+ * is kept for traceability. Returns true (and has already replied) when the
+ * reading was discarded.
+ */
+function checkPreempted(
+  options: CameraRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  direction: 'entrance' | 'exit',
+  event: NormalizedCameraEvent,
+  triggeredAt: Date,
+  scaleResult: ScaleReadResult,
+): boolean {
+  if (scaleResult.failureReason !== 'preempted') return false;
+
+  request.log.warn(
+    { plate: event.rawPlate, cameraId: event.cameraId, direction, waitedMs: scaleResult.waitedMs },
+    `camera: ${direction} reading discarded — its weight capture was preempted by a newer reading for a different plate (see docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md)`,
+  );
+  options.recordRawEvent(direction === 'entrance' ? 'camera_entrance' : 'camera_exit', {
+    rawPlate: event.rawPlate,
+    cameraId: event.cameraId,
+    triggeredAt,
+    discarded: 'preempted_by_new_plate',
+    waitedMs: scaleResult.waitedMs,
+    attemptsUsed: scaleResult.attemptsUsed,
+  });
+  reply.send({ kind: 'reading_preempted' });
+  return true;
+}
+
 export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
   app.post('/webhooks/camera/entrance', async (request, reply) => {
     // Captured before the scale wait — only used for the post-release
@@ -161,11 +199,16 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
 
     options.weighingEvents.emitPlateReceived({ direction: 'entrance', rawPlate: event.rawPlate });
 
-    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
+    const scaleResult = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'entrance',
       plate: event.rawPlate,
+      // Already normalized ('' when unreadable) — a readable plate preempts
+      // any in-flight read for a different plate.
+      plateKey: event.rawPlate,
     });
+    if (checkPreempted(options, request, reply, 'entrance', event, triggeredAt, scaleResult)) return;
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = scaleResult;
     // Captured right after the scale read settles (or gives up) — this is
     // entryAt: the moment the weighing itself finished, not when the truck
     // crossed the camera (see docs/plans/2026-11-04-ticket-timestamp-from-weighing-plan.md).
@@ -245,11 +288,14 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
 
     options.weighingEvents.emitPlateReceived({ direction: 'exit', rawPlate: event.rawPlate });
 
-    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = await options.scaleClient.readStableWeight({
+    const scaleResult = await options.scaleClient.readStableWeight({
       logger: request.log,
       direction: 'exit',
       plate: event.rawPlate,
+      plateKey: event.rawPlate,
     });
+    if (checkPreempted(options, request, reply, 'exit', event, triggeredAt, scaleResult)) return;
+    const { weightKg, weightCaptureFailed, failureReason, waitedMs, attemptsUsed } = scaleResult;
     // See the matching comment in the entrance handler.
     const weighingFinishedAt = new Date();
 

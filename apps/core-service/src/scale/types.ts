@@ -16,7 +16,9 @@ export type ScaleReadFailureReason =
   | 'connect_error'
   | 'connect_timeout'
   | 'socket_error'
-  | 'stability_timeout';
+  | 'stability_timeout'
+  /** A newer reading for a different plate took over the scale — see ScaleReadContext.plateKey. */
+  | 'preempted';
 
 export interface ScaleReadResult {
   weightKg: number | null;
@@ -52,6 +54,17 @@ export interface ScaleReadContext {
   direction?: 'entrance' | 'exit';
   /** Raw (pre-normalization) plate read by the camera, for correlating a scale failure back to a specific truck. */
   plate?: string;
+  /**
+   * Normalized plate identifying which truck this read is for. A non-empty
+   * key **preempts** every older read still active or queued whose key
+   * differs (they resolve with `failureReason: 'preempted'`, no retries):
+   * the scale is one physical platform, so a new truck's plate means the
+   * previous truck is no longer the one being weighed — see
+   * docs/plans/2026-11-10-preempt-scale-read-on-new-plate-plan.md. An
+   * empty/omitted key (unreadable plate) never preempts anything, but can
+   * itself be preempted.
+   */
+  plateKey?: string;
 }
 
 export interface ScaleClient {
