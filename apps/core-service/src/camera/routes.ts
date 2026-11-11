@@ -4,7 +4,7 @@ import type { DriverSignalAdapter } from '../driver-signal/types.js';
 import type { PrintService } from '../printing/print-service.js';
 import type { EntranceResult, ExitResult, SessionService } from '../tickets/session-service.js';
 import type { RawEventSource } from '../db/schema.js';
-import { parseAnprXml } from './anpr-xml.js';
+import { parseAnprXml, type AnprXmlEvent } from './anpr-xml.js';
 import { normalizeCameraPayload, type NormalizedCameraEvent } from './normalize.js';
 import type { WeighingEvents } from './weighing-events.js';
 
@@ -27,19 +27,24 @@ export interface CameraRoutesOptions {
 
 const ANPR_XML_FIELD_NAME = 'anpr.xml';
 
+/** How much of an unusable `anpr.xml` part to put in the log line. */
+const IGNORED_XML_LOG_CHARS = 500;
+
 /**
  * The real camera push is `multipart/form-data`: one `anpr.xml` part (the
  * event metadata this system cares about) plus three JPEG parts
  * (`detectionPicture`/`featurePicture`/`licensePlatePicture`), per the
  * real capture in the master plan §7 item 3. The JPEGs are drained (so the
  * request body is fully consumed) and discarded — nothing in this system
- * stores images today. Returns `null` (and has already replied 400) if the
- * `anpr.xml` part is missing or malformed.
+ * stores images today. `xml` is `null` if there was no `anpr.xml` part;
+ * `fieldNames` lists every part received (for logging an unusable push).
  */
-async function readAnprXmlPart(request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
+async function readAnprXmlPart(request: FastifyRequest): Promise<{ xml: string | null; fieldNames: string[] }> {
   let xml: string | null = null;
+  const fieldNames: string[] = [];
 
   for await (const part of request.parts()) {
+    fieldNames.push(part.fieldname);
     if (part.type === 'file') {
       const buffer = await part.toBuffer();
       if (part.fieldname === ANPR_XML_FIELD_NAME) {
@@ -48,12 +53,55 @@ async function readAnprXmlPart(request: FastifyRequest, reply: FastifyReply): Pr
     }
   }
 
+  return { xml, fieldNames };
+}
+
+/**
+ * Acknowledges (200) a camera push this system can't use — no `anpr.xml`
+ * part, or one that isn't an ANPR event (no `deviceID`/`dateTime`) —
+ * instead of rejecting it with 400. The camera has `checkResponseEnabled`
+ * on, so a non-2xx makes it retry the same push indefinitely (observed
+ * 2026-11-10: a 400 every ~10 s for hours on the entrance camera, with real
+ * plate reads apparently stuck behind it) — see
+ * docs/plans/2026-11-10-camera-ack-non-anpr-events-plan.md. Nothing else
+ * happens for an ignored push: no ticket, scale read, signal or print.
+ */
+function ignoreUnusablePush(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  direction: 'entrance' | 'exit',
+  reason: string,
+  fieldNames: string[],
+  xml: string | null,
+): void {
+  request.log.warn(
+    { direction, reason, fieldNames, xmlSample: xml?.slice(0, IGNORED_XML_LOG_CHARS) ?? null },
+    `camera: ${direction} push ignored (acknowledged with 200 so the camera does not retry it) — ${reason}`,
+  );
+  reply.send({ kind: 'ignored', reason });
+}
+
+/**
+ * Reads and parses the push's `anpr.xml`. Returns `null` (and has already
+ * replied via `ignoreUnusablePush`) when the push isn't a usable ANPR event.
+ */
+async function readAnprEvent(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  direction: 'entrance' | 'exit',
+): Promise<AnprXmlEvent | null> {
+  const { xml, fieldNames } = await readAnprXmlPart(request);
   if (xml === null) {
-    reply.code(400).send({ error: `missing "${ANPR_XML_FIELD_NAME}" part` });
+    ignoreUnusablePush(request, reply, direction, `missing "${ANPR_XML_FIELD_NAME}" part`, fieldNames, null);
     return null;
   }
 
-  return xml;
+  try {
+    return parseAnprXml(xml);
+  } catch (err) {
+    ignoreUnusablePush(request, reply, direction, (err as Error).message, fieldNames, xml);
+    return null;
+  }
 }
 
 /**
@@ -105,16 +153,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     // its clock isn't kept in sync with the server.
     const triggeredAt = new Date();
 
-    const xml = await readAnprXmlPart(request, reply);
-    if (xml === null) return;
-
-    let anprEvent;
-    try {
-      anprEvent = parseAnprXml(xml);
-    } catch (err) {
-      reply.code(400).send({ error: (err as Error).message });
-      return;
-    }
+    const anprEvent = await readAnprEvent(request, reply, 'entrance');
+    if (anprEvent === null) return;
 
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, triggeredAt)) return;
@@ -197,16 +237,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     // debounce-only, exitAt comes from weighingFinishedAt below.
     const triggeredAt = new Date();
 
-    const xml = await readAnprXmlPart(request, reply);
-    if (xml === null) return;
-
-    let anprEvent;
-    try {
-      anprEvent = parseAnprXml(xml);
-    } catch (err) {
-      reply.code(400).send({ error: (err as Error).message });
-      return;
-    }
+    const anprEvent = await readAnprEvent(request, reply, 'exit');
+    if (anprEvent === null) return;
 
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'exit', event, triggeredAt)) return;

@@ -271,32 +271,72 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(driverSignalCalls).toEqual([]);
   });
 
-  it('rejects a request with no anpr.xml part', async () => {
+  // A non-2xx makes the camera (checkResponseEnabled) retry the same push
+  // indefinitely, apparently blocking real plate reads behind it — so an
+  // unusable push is acknowledged with 200 and otherwise ignored. See
+  // docs/plans/2026-11-10-camera-ack-non-anpr-events-plan.md.
+  for (const direction of ['entrance', 'exit'] as const) {
+    it(`acknowledges (200, ignored) a ${direction} push with no anpr.xml part, doing nothing else`, async () => {
+      const { body, contentType } = await buildMultipartBody([
+        { fieldName: 'somethingElse', content: 'irrelevant' },
+      ]);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/webhooks/camera/${direction}`,
+        headers: { 'content-type': contentType },
+        payload: body,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ kind: 'ignored', reason: 'missing "anpr.xml" part' });
+      expect(driverSignalCalls).toEqual([]);
+      expect(printCalls).toBe(0);
+      expect(repo.listTickets({}).total).toBe(0);
+    });
+
+    it(`acknowledges (200, ignored) a ${direction} anpr.xml that is not an ANPR event, doing nothing else`, async () => {
+      const { body, contentType } = await buildMultipartBody([
+        { fieldName: 'anpr.xml', content: '<EventNotificationAlert></EventNotificationAlert>', filename: 'anpr.xml' },
+      ]);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/webhooks/camera/${direction}`,
+        headers: { 'content-type': contentType },
+        payload: body,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().kind).toBe('ignored');
+      expect(driverSignalCalls).toEqual([]);
+      expect(printCalls).toBe(0);
+      expect(repo.listTickets({}).total).toBe(0);
+    });
+  }
+
+  it('still processes a valid ANPR push normally after an ignored one', async () => {
     const { body, contentType } = await buildMultipartBody([
       { fieldName: 'somethingElse', content: 'irrelevant' },
     ]);
-    const response = await app.inject({
+    await app.inject({
       method: 'POST',
       url: '/webhooks/camera/entrance',
       headers: { 'content-type': contentType },
       payload: body,
     });
 
-    expect(response.statusCode).toBe(400);
-  });
-
-  it('rejects an anpr.xml part missing required fields', async () => {
-    const { body, contentType } = await buildMultipartBody([
-      { fieldName: 'anpr.xml', content: '<EventNotificationAlert></EventNotificationAlert>', filename: 'anpr.xml' },
+    const { body: validBody, contentType: validContentType } = await buildMultipartBody([
+      { fieldName: 'anpr.xml', content: anprXml({ plate: 'ABC1234' }), filename: 'anpr.xml' },
     ]);
     const response = await app.inject({
       method: 'POST',
       url: '/webhooks/camera/entrance',
-      headers: { 'content-type': contentType },
-      payload: body,
+      headers: { 'content-type': validContentType },
+      payload: validBody,
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().kind).not.toBe('ignored');
+    expect(repo.findOpenByPlate('ABC1234')).toBeDefined();
   });
 });
 
