@@ -99,6 +99,16 @@ export interface TicketRepository {
    * the *other* plate of the same articulated rig (tractor vs. trailer).
    */
   findMostRecentExitAt(): Date | null;
+  /**
+   * `entryAt`/`exitAt` of the most recent ticket for this specific plate
+   * (any ticket, not just a still-open one), or null if that plate has
+   * none. Scoped by plate and direction, unlike `findMostRecentExitAt` —
+   * anchors the same-plate duplicate camera read debounce (see
+   * docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md), which
+   * is a different check from the post-release debounce above.
+   */
+  findMostRecentEntryAtByPlate(plate: string): Date | null;
+  findMostRecentExitAtByPlate(plate: string): Date | null;
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
@@ -257,6 +267,28 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .select({ exitAt: tickets.exitAt })
         .from(tickets)
         .where(isNotNull(tickets.exitAt))
+        .orderBy(desc(tickets.exitAt))
+        .limit(1)
+        .get();
+      return row?.exitAt ?? null;
+    },
+
+    findMostRecentEntryAtByPlate(plate) {
+      const row = db
+        .select({ entryAt: tickets.entryAt })
+        .from(tickets)
+        .where(and(eq(tickets.plate, plate), isNotNull(tickets.entryAt)))
+        .orderBy(desc(tickets.entryAt))
+        .limit(1)
+        .get();
+      return row?.entryAt ?? null;
+    },
+
+    findMostRecentExitAtByPlate(plate) {
+      const row = db
+        .select({ exitAt: tickets.exitAt })
+        .from(tickets)
+        .where(and(eq(tickets.plate, plate), isNotNull(tickets.exitAt)))
         .orderBy(desc(tickets.exitAt))
         .limit(1)
         .get();

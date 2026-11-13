@@ -88,6 +88,9 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
     printService,
     getMostRecentExitAt: () => repo.findMostRecentExitAt(),
     postReleaseDebounceMs: cameraConfig.postReleaseDebounceMs,
+    getMostRecentEntryAtByPlate: (plate) => repo.findMostRecentEntryAtByPlate(plate),
+    getMostRecentExitAtByPlate: (plate) => repo.findMostRecentExitAtByPlate(plate),
+    duplicatePlateDebounceMs: cameraConfig.duplicatePlateDebounceMs,
     recordRawEvent: (source, payload) => repo.recordRawEvent(source, payload),
     weighingEvents,
   });

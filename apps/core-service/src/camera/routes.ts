@@ -20,6 +20,15 @@ export interface CameraRoutesOptions {
   getMostRecentExitAt: () => Date | null;
   /** How long after that to discard any camera webhook outright, regardless of which plate it reports. */
   postReleaseDebounceMs: number;
+  /**
+   * `entryAt`/`exitAt` of the most recent ticket for a specific plate, or
+   * null if that plate has none — see
+   * docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md.
+   */
+  getMostRecentEntryAtByPlate: (plate: string) => Date | null;
+  getMostRecentExitAtByPlate: (plate: string) => Date | null;
+  /** How long after a reading for a given plate/direction to discard a further reading for that same plate/direction. */
+  duplicatePlateDebounceMs: number;
   recordRawEvent: (source: RawEventSource, rawPayload: unknown) => void;
   /** Narrates each reading for the Admin UI's live weighing panel — see docs/plans/2026-11-05-operator-live-weighing-panel.md. */
   weighingEvents: WeighingEvents;
@@ -145,6 +154,57 @@ function checkPostReleaseDebounce(
 }
 
 /**
+ * Discards a reading for a plate that was already read, in the same
+ * direction, less than `duplicatePlateDebounceMs` ago — see
+ * docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md. Distinct
+ * from `checkPostReleaseDebounce` (global, time-only, exists precisely
+ * because that rollback bounce reads the *other* plate of the rig) and
+ * from `checkPreempted` (a *different* plate interrupting an in-progress
+ * capture). This one is the plain case: the same plate, same direction,
+ * twice in quick succession (an idling truck re-triggering a camera, or a
+ * duplicated push). An unreadable plate (`rawPlate === ''`) is never
+ * debounced and never debounces a later reading — there is nothing
+ * reliable to match. Returns true (and has already replied) when the
+ * reading was discarded.
+ */
+function checkDuplicatePlateRead(
+  options: CameraRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  direction: 'entrance' | 'exit',
+  event: NormalizedCameraEvent,
+  triggeredAt: Date,
+): boolean {
+  if (event.rawPlate === '') return false;
+
+  const lastSameDirectionAt =
+    direction === 'entrance'
+      ? options.getMostRecentEntryAtByPlate(event.rawPlate)
+      : options.getMostRecentExitAtByPlate(event.rawPlate);
+  if (lastSameDirectionAt === null) return false;
+
+  const msSinceLastSameDirectionRead = triggeredAt.getTime() - lastSameDirectionAt.getTime();
+  if (msSinceLastSameDirectionRead < 0 || msSinceLastSameDirectionRead >= options.duplicatePlateDebounceMs) {
+    return false;
+  }
+
+  request.log.warn(
+    { plate: event.rawPlate, cameraId: event.cameraId, direction, msSinceLastSameDirectionRead },
+    `camera: ${direction} reading discarded — received ${msSinceLastSameDirectionRead}ms after the last ${direction} reading for this same plate, inside the duplicate-plate debounce window (see docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md)`,
+  );
+  options.recordRawEvent(direction === 'entrance' ? 'camera_entrance' : 'camera_exit', {
+    rawPlate: event.rawPlate,
+    cameraId: event.cameraId,
+    triggeredAt,
+    discarded: 'duplicate_plate_read',
+    msSinceLastSameDirectionRead,
+    ...event.readQuality,
+  });
+  reply.send({ kind: 'reading_duplicate' });
+  return true;
+}
+
+/**
  * Discards a reading whose scale capture was preempted by a newer reading
  * for a different plate (the scale is one platform, so the new plate means
  * this truck is no longer the one being weighed) — see
@@ -198,6 +258,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
 
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'entrance', event, triggeredAt)) return;
+    if (checkDuplicatePlateRead(options, request, reply, 'entrance', event, triggeredAt)) return;
 
     options.weighingEvents.emitPlateReceived({ direction: 'entrance', rawPlate: event.rawPlate });
 
@@ -288,6 +349,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
 
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'exit', event, triggeredAt)) return;
+    if (checkDuplicatePlateRead(options, request, reply, 'exit', event, triggeredAt)) return;
 
     options.weighingEvents.emitPlateReceived({ direction: 'exit', rawPlate: event.rawPlate });
 

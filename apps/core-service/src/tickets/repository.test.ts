@@ -647,6 +647,75 @@ describe('TicketRepository', () => {
     });
   });
 
+  describe('findMostRecentEntryAtByPlate / findMostRecentExitAtByPlate', () => {
+    it('returns null on an empty DB', () => {
+      expect(repo.findMostRecentEntryAtByPlate('DUP0001')).toBeNull();
+      expect(repo.findMostRecentExitAtByPlate('DUP0001')).toBeNull();
+    });
+
+    it('returns null when the plate has no ticket', () => {
+      repo.create({
+        plate: 'DUP0002',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentEntryAtByPlate('DUP0999')).toBeNull();
+      expect(repo.findMostRecentExitAtByPlate('DUP0999')).toBeNull();
+    });
+
+    it('returns the latest entryAt/exitAt for that plate across multiple tickets, unaffected by other plates', () => {
+      const first = repo.create({
+        plate: 'DUP0003',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(first.id, {
+        exitAt: new Date('2026-01-01T09:00:00Z'),
+        exitWeightKg: 8000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      // Same plate re-enters later (closed-then-reopened history).
+      const second = repo.create({
+        plate: 'DUP0003',
+        entryAt: new Date('2026-01-02T08:00:00Z'),
+        entryWeightKg: 21000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(second.id, {
+        exitAt: new Date('2026-01-02T09:00:00Z'),
+        exitWeightKg: 9000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      // A different plate, with later timestamps, must not leak in.
+      const other = repo.create({
+        plate: 'DUP0004',
+        entryAt: new Date('2026-01-03T08:00:00Z'),
+        entryWeightKg: 22000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(other.id, {
+        exitAt: new Date('2026-01-03T09:00:00Z'),
+        exitWeightKg: 10000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentEntryAtByPlate('DUP0003')).toEqual(new Date('2026-01-02T08:00:00Z'));
+      expect(repo.findMostRecentExitAtByPlate('DUP0003')).toEqual(new Date('2026-01-02T09:00:00Z'));
+    });
+  });
+
   describe('ticket change events', () => {
     it('emits a change event for every mutating method', () => {
       const changes: Ticket[] = [];

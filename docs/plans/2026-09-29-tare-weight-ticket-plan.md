@@ -191,7 +191,10 @@ the Admin UI for context.
     driver signal.
   - Open ticket already exists for `X` → **replace** its entry weight/time
     with the new reading (last-write-wins, per stakeholder decision), log to
-    `ticket_audit_log`.
+    `ticket_audit_log`. **Correction (2026-11-12):** this only applies once
+    the duplicate-plate debounce window below has passed — a retrigger
+    *inside* that window is discarded outright instead, never reaching this
+    rule.
   - Plate unreadable/empty from camera payload → log to `raw_events` only,
     create nothing automatically, surface in Admin UI as an unresolved
     camera event needing manual ticket creation.
@@ -210,6 +213,17 @@ the Admin UI for context.
   spurious read reports the *other* plate of the same rig, not a repeat of
   the one already on file, so a same-plate check can't catch it. See §11
   for the production incident and the rejected same-plate alternative.
+- **Duplicate-plate debounce (2026-11-12):** separately from the above —
+  checked right after it, same place in both camera handlers — a reading
+  is also discarded outright if it reports the **same plate**, in the
+  **same direction** (entrance vs. entrance, exit vs. exit; never across
+  directions), as a reading already on file for that plate within
+  `CAMERA_DUPLICATE_PLATE_DEBOUNCE_MS` (default 2 minutes). This is the
+  plain "same truck re-triggered the same camera" case (idling at the
+  gate, a duplicated push) that the global post-release debounce above
+  deliberately doesn't cover (that one exists for a *different*-plate
+  rollback bounce). An unreadable plate never debounces and is never
+  debounced against. See §11 for the full rationale.
 - **Exit camera fires** for plate `X`:
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
@@ -1462,3 +1476,55 @@ merge per `CLAUDE.md`):
   carry no plate read and are unchanged.
 - See `docs/plans/2026-11-10-store-anpr-confidence-plan.md`; delete it once
   this entry is merged.
+
+### Same-plate duplicate camera read debounce (2026-11-12)
+
+- **User request**: if two entrance reads, or two exit reads, arrive for
+  the same plate within under 2 minutes (parametrized), the second must be
+  discarded — logged, never acted on.
+- **Distinct from the two existing discard paths, not a replacement for
+  either**:
+  - The post-release debounce (2026-11-03, above) is global and
+    time-only, precisely *because* its failure mode is the spurious read
+    reporting the *other* plate of the same articulated rig — same-plate
+    matching was explicitly rejected for that problem. That rejection was
+    scoped to the rollback bounce, not a verdict against same-plate
+    matching in general.
+  - Scale-read preemption (2026-11-10, above) discards an in-progress
+    capture on a **different** plate arriving — the opposite condition.
+  - This feature is the plain remaining case: the *same* plate triggering
+    the *same* camera twice in quick succession (idling at the gate, a
+    duplicated ANPR push), which neither existing check was built to
+    catch.
+- **Decision**: `TicketRepository` gained
+  `findMostRecentEntryAtByPlate(plate)`/`findMostRecentExitAtByPlate(plate)`
+  (`tickets/repository.ts`), each scoped to one plate (unlike the global
+  `findMostRecentExitAt`). Both camera handlers (`camera/routes.ts`) check
+  this — after `checkPostReleaseDebounce` and before
+  `emitPlateReceived`/the scale read/the driver signal — comparing the
+  incoming reading's direction (entrance or exit) against the most recent
+  reading in that **same** direction for that **same** plate (not scoped
+  to a still-open ticket — a stray duplicate after the ticket already
+  closed is still caught, which also heads off a false exit `ANOMALY`).
+  Entrance only debounces against a prior entrance, exit only against a
+  prior exit — the two directions never debounce each other, since that's
+  the job of the existing entry/exit matching rules, not this one. An
+  unreadable plate (`rawPlate === ''`) never debounces and is never
+  debounced against, matching the preemption check's same exception.
+  Default window **120000ms (2 minutes)**, configurable via
+  `CAMERA_DUPLICATE_PLATE_DEBOUNCE_MS` (`camera/config.ts`). A discard is
+  logged (`request.log.warn`) and recorded as a `raw_events` row
+  (`discarded: 'duplicate_plate_read'`), never linked to a ticket, replying
+  `{ kind: 'reading_duplicate' }` — a third, distinct outcome kind from
+  `reading_debounced`/`reading_preempted` so the three discard paths stay
+  distinguishable in logs.
+- **Correction to the existing entrance last-write-wins rule** (§5): a
+  retrigger of a still-open ticket's entrance now only follows
+  last-write-wins once this window has passed; inside it, the retrigger is
+  discarded instead.
+- **Accepted risk**: a genuinely fast round trip for the same plate inside
+  the window would also be discarded — same shape of risk as the
+  post-release debounce's, and for the same reason kept as a tunable env
+  var rather than hardcoded.
+- See `docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md`;
+  delete it once this entry is merged.

@@ -232,6 +232,18 @@ describe('POST /webhooks/camera/entrance', () => {
     nextScaleReading = { weightKg: 19000, weightCaptureFailed: false };
     const first = await postEntrance({ plate: 'RET1234' });
 
+    // Backdate past the duplicate-plate debounce window (default 2min —
+    // see docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md),
+    // which otherwise discards a same-plate/same-direction retrigger this
+    // soon instead of reaching the last-write-wins rule this test covers.
+    const ticket = repo.findOpenByPlate('RET1234')!;
+    repo.updateEntry(ticket.id, {
+      entryAt: new Date(Date.now() - 130000),
+      entryWeightKg: ticket.entryWeightKg,
+      entryCameraId: ticket.entryCameraId,
+      entryCaptureFailed: false,
+    });
+
     nextScaleReading = { weightKg: 19500, weightCaptureFailed: false };
     const second = await postEntrance({ plate: 'RET1234' });
 
@@ -519,6 +531,106 @@ describe('post-release debounce', () => {
     const response = await postEntrance({ plate: 'FRESH01' });
 
     expect(response.json().kind).toBe('ticket_opened');
+  });
+});
+
+// See docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md.
+describe('duplicate plate debounce', () => {
+  it('discards a second entrance for the same plate inside the window', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'DUP0001' });
+
+    scaleContexts = [];
+    driverSignalCalls = [];
+    const duplicate = await postEntrance({ plate: 'DUP0001' });
+
+    expect(duplicate.json()).toEqual({ kind: 'reading_duplicate' });
+    expect(scaleContexts).toEqual([]);
+    expect(driverSignalCalls).toEqual([]);
+
+    const discarded = cameraRawEvents().find((e) => e.payload.discarded === 'duplicate_plate_read');
+    expect(discarded).toBeDefined();
+    expect(discarded?.payload).toMatchObject({ rawPlate: 'DUP0001' });
+  });
+
+  it('discards a second exit for the same plate inside the window, even after the ticket already closed (no false anomaly)', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'DUP0002' });
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    const closed = await postExit({ plate: 'DUP0002' });
+
+    // Backdate the close past the global post-release debounce window
+    // (15s default) but still inside the per-plate duplicate window (2min
+    // default), so this test exercises the duplicate-plate check and not
+    // the unrelated post-release one.
+    const ticket = repo.findById(closed.json().ticketId)!;
+    repo.correctExit(ticket.id, {
+      exitAt: new Date(Date.now() - 20000),
+      exitWeightKg: ticket.exitWeightKg,
+      exitCameraId: ticket.exitCameraId,
+      exitCaptureFailed: false,
+    });
+
+    scaleContexts = [];
+    driverSignalCalls = [];
+    const duplicate = await postExit({ plate: 'DUP0002' });
+
+    expect(duplicate.json()).toEqual({ kind: 'reading_duplicate' });
+    expect(scaleContexts).toEqual([]);
+    expect(driverSignalCalls).toEqual([]);
+    expect(repo.listTickets({ status: 'ANOMALY' }).items).toEqual([]);
+  });
+
+  it('does not debounce a different plate', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'DUP0003' });
+
+    nextScaleReading = { weightKg: 18000, weightCaptureFailed: false };
+    const response = await postEntrance({ plate: 'DUP0004' });
+
+    expect(response.json().kind).toBe('ticket_opened');
+  });
+
+  it('does not debounce across directions (entrance vs. exit for the same plate)', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    const opened = await postEntrance({ plate: 'DUP0005' });
+    expect(opened.json().kind).toBe('ticket_opened');
+
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    const closed = await postExit({ plate: 'DUP0005' });
+
+    expect(closed.json().kind).toBe('ticket_closed');
+  });
+
+  it('never debounces an unreadable plate, and does not debounce against one', async () => {
+    const first = await postEntrance({ plate: 'DUP0006', confidence: 50 });
+    expect(first.json()).toEqual({ kind: 'plate_unreadable' });
+
+    const second = await postEntrance({ plate: 'DUP0006', confidence: 50 });
+    expect(second.json()).toEqual({ kind: 'plate_unreadable' });
+  });
+
+  it('processes a reading normally once the duplicate window has passed', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    const opened = await postEntrance({ plate: 'DUP0007' });
+
+    // Backdate the entrance past the default 2-minute window instead of
+    // sleeping the test for real.
+    const ticket = repo.findById(opened.json().ticketId)!;
+    repo.updateEntry(ticket.id, {
+      entryAt: new Date(Date.now() - 130000),
+      entryWeightKg: ticket.entryWeightKg,
+      entryCameraId: ticket.entryCameraId,
+      entryCaptureFailed: false,
+    });
+
+    nextScaleReading = { weightKg: 21000, weightCaptureFailed: false };
+    const response = await postEntrance({ plate: 'DUP0007' });
+
+    // The ticket is still open, so this is the existing last-write-wins
+    // retrigger path, not a fresh open — confirms it's no longer being
+    // swallowed by the duplicate-plate debounce once the window has passed.
+    expect(response.json().kind).toBe('ticket_retriggered');
   });
 });
 
