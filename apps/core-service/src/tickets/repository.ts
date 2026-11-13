@@ -199,7 +199,7 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .select()
         .from(tickets)
         .where(where)
-        .orderBy(desc(tickets.id))
+        .orderBy(desc(tickets.updatedAt), desc(tickets.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize)
         .all();

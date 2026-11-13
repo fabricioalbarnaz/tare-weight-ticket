@@ -411,6 +411,33 @@ describe('TicketRepository', () => {
       expect(page2.items.map((t) => t.plate)).toEqual(['LIST0001']);
     });
 
+    it('sorts by last update, not by creation order', () => {
+      const first = repo.create({
+        plate: 'UPD0001',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.create({
+        plate: 'UPD0002',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      repo.updateEntry(first.id, {
+        entryAt: new Date(),
+        entryWeightKg: 1200,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      const result = repo.listTickets({});
+      expect(result.items.map((t) => t.plate)).toEqual(['UPD0001', 'UPD0002']);
+    });
+
     it('filters by status', () => {
       const open = repo.create({
         plate: 'FILT0001',
