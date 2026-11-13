@@ -96,6 +96,8 @@ describe('OperationPage', () => {
       netWeightKg: null,
       printedAt: null,
       createdByAdmin: false,
+      reweighOfTicketId: null,
+      reweighedByTicketId: null,
       notes: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

@@ -4,7 +4,8 @@
     "yes": "Sim",
     "no": "Não",
     "cancel": "Cancelar",
-    "backToDashboard": "← Voltar ao painel"
+    "backToDashboard": "← Voltar ao painel",
+    "view": "Ver"
   },
   "language": {
     "label": "Idioma",
@@ -109,6 +110,8 @@
     "netWeight": "Peso líquido",
     "printedAt": "Impresso em",
     "createdByAdmin": "Criado pelo administrador",
+    "reweighOf": "Repesagem do ticket #{{number}}",
+    "reweighedBy": "Substituído pelo ticket de repesagem #{{number}}",
     "auditTrail": "Trilha de auditoria"
   },
   "unresolvedEvents": {
@@ -309,7 +312,9 @@
       "netWeight": "Peso líquido",
       "empty": "Nenhum ticket encontrado.",
       "suspectWeightShort": "Checar peso",
-      "suspectWeight": "Uma leitura da balança deste ticket só foi confirmada após uma nova tentativa — confira se não houve cruzamento com outro caminhão na balança no mesmo intervalo."
+      "suspectWeight": "Uma leitura da balança deste ticket só foi confirmada após uma nova tentativa — confira se não houve cruzamento com outro caminhão na balança no mesmo intervalo.",
+      "reweighShort": "Repesagem",
+      "reweigh": "Este ticket repesa a saída de um ticket já fechado para a mesma placa."
     },
     "filters": {
       "searchPlaceholder": "Buscar por placa…"

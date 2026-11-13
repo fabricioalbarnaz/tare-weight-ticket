@@ -14,6 +14,7 @@ import type { PrintClient } from './printing/print-client.js';
 import { createPrintService } from './printing/print-service.js';
 import { registerCameraRoutes } from './camera/routes.js';
 import { loadCameraConfig } from './camera/config.js';
+import { loadTicketConfig } from './tickets/config.js';
 import { registerPrintRoutes } from './printing/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
 
@@ -67,7 +68,8 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   const ticketEvents = createTicketEvents();
   const weighingEvents = createWeighingEvents();
   const repo = createTicketRepository(options.db, ticketEvents);
-  const sessionService = createSessionService(repo, truckRepo);
+  const ticketConfig = loadTicketConfig();
+  const sessionService = createSessionService(repo, truckRepo, ticketConfig);
   const printService = createPrintService(repo, options.printClient);
 
   // Generous fileSize limit: the camera's ANPR push carries three JPEGs

@@ -264,6 +264,8 @@ export const handlers = [
       netWeightKg: null,
       printedAt: null,
       createdByAdmin: true,
+      reweighOfTicketId: null,
+      reweighedByTicketId: null,
       notes: body.reason,
       createdAt: now,
       updatedAt: now,

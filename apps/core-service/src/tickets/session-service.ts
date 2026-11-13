@@ -2,6 +2,7 @@ import { normalizePlate } from '../domain/plate.js';
 import type { ScaleReadFailureReason } from '../scale/types.js';
 import type { CameraReadQuality } from '../camera/normalize.js';
 import type { TruckRepository } from '../trucks/repository.js';
+import type { TicketConfig } from './config.js';
 import type { Ticket, TicketRepository } from './repository.js';
 
 export const TICKET_AUDIT_ACTIONS = {
@@ -15,6 +16,10 @@ export const TICKET_AUDIT_ACTIONS = {
   ENTRY_VIA_TARE: 'internal_truck_entry_via_tare',
   /** The exit leg was filled from a registered internal truck's active conjunto tare — see master plan §11. */
   EXIT_VIA_TARE: 'internal_truck_exit_via_tare',
+  /** A new ticket created to correct a prior exit weight, reusing a CLOSED ticket's entry — see master plan §5/§11 "Exit re-weigh". */
+  REWEIGH_CREATED: 'reweigh_ticket_created',
+  /** The original ticket superseded by a REWEIGH_CREATED ticket — the inverse side of that action. */
+  REWEIGHED: 'ticket_reweighed',
 } as const;
 
 export interface EntranceReadingInput {
@@ -77,6 +82,8 @@ export type ExitResult =
   | { kind: 'ticket_closed'; ticket: Ticket }
   | { kind: 'exit_capture_pending'; ticket: Ticket }
   | { kind: 'anomaly_flagged'; ticket: Ticket }
+  /** Re-weigh correction (master plan §5/§11): no OPEN ticket for the plate, but a recently CLOSED one existed — a new ticket was created reusing its entry and closed with this new exit weight. */
+  | { kind: 'ticket_reweighed'; ticket: Ticket; originalTicketId: number }
   | { kind: 'plate_unreadable' };
 
 export interface SessionService {
@@ -105,7 +112,11 @@ function cameraRawPayload(
   };
 }
 
-export function createSessionService(repo: TicketRepository, truckRepo: TruckRepository): SessionService {
+export function createSessionService(
+  repo: TicketRepository,
+  truckRepo: TruckRepository,
+  ticketConfig: TicketConfig,
+): SessionService {
   return {
     handleEntranceReading(input) {
       const plate = normalizePlate(input.rawPlate);
@@ -331,6 +342,61 @@ export function createSessionService(repo: TicketRepository, truckRepo: TruckRep
             ticket.id,
           );
           return { kind: 'ticket_closed', ticket };
+        }
+
+        // Re-weigh correction (master plan §5/§11): the truck re-entered
+        // through another gate (no new entrance weighing, so no OPEN
+        // ticket exists) and only needs its exit corrected. A failed
+        // capture never qualifies — there's no new weight to reuse, so it
+        // falls through to the ANOMALY path below like any other
+        // unmatched exit.
+        const reweighCandidate = input.weightCaptureFailed
+          ? undefined
+          : repo.findMostRecentClosedTicketByPlate(plate);
+        const withinReweighWindow =
+          reweighCandidate?.exitAt != null &&
+          input.weighingFinishedAt.getTime() - reweighCandidate.exitAt.getTime() <= ticketConfig.reweighWindowMs;
+
+        if (reweighCandidate && withinReweighWindow) {
+          const opened = repo.create({
+            plate,
+            entryAt: reweighCandidate.entryAt ?? input.weighingFinishedAt,
+            entryWeightKg: reweighCandidate.entryWeightKg,
+            entryCameraId: reweighCandidate.entryCameraId,
+            entryCaptureFailed: reweighCandidate.entryCaptureFailed,
+            reweighOfTicketId: reweighCandidate.id,
+          });
+          const ticket = repo.close(opened.id, {
+            exitAt: input.weighingFinishedAt,
+            exitWeightKg: input.weightKg,
+            exitCameraId: input.cameraId,
+            exitCaptureFailed: false,
+          });
+          repo.linkReweigh(reweighCandidate.id, ticket.id);
+
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.REWEIGH_CREATED, {
+            originalTicketId: reweighCandidate.id,
+            weightKg: input.weightKg,
+            cameraId: input.cameraId,
+            attemptsUsed: input.attemptsUsed,
+          });
+          repo.appendAuditLog(reweighCandidate.id, 'system', TICKET_AUDIT_ACTIONS.REWEIGHED, {
+            newTicketId: ticket.id,
+          });
+          repo.recordRawEvent('camera_exit', cameraRawPayload(input, plate), ticket.id);
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'exit',
+              weightKg: input.weightKg,
+              weightCaptureFailed: false,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
+
+          return { kind: 'ticket_reweighed', ticket, originalTicketId: reweighCandidate.id };
         }
 
         const ticket = repo.flagAnomaly({

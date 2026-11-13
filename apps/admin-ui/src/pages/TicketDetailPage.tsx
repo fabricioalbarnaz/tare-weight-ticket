@@ -19,6 +19,21 @@ export function TicketDetailPage() {
     enabled: Number.isFinite(ticketId),
   });
 
+  // Re-weigh links (master plan §5/§11) show the other ticket's
+  // human-facing ticketNumber, not its raw id, so each is fetched once
+  // the main ticket reveals which ids to look up.
+  const maybeTicket = data?.ticket;
+  const originalTicketQuery = useQuery({
+    queryKey: ['tickets', maybeTicket?.reweighOfTicketId],
+    queryFn: () => api.getTicket(maybeTicket!.reweighOfTicketId!),
+    enabled: maybeTicket?.reweighOfTicketId != null,
+  });
+  const reweighTicketQuery = useQuery({
+    queryKey: ['tickets', maybeTicket?.reweighedByTicketId],
+    queryFn: () => api.getTicket(maybeTicket!.reweighedByTicketId!),
+    enabled: maybeTicket?.reweighedByTicketId != null,
+  });
+
   if (isLoading) return <p className="text-sm text-slate-500">{t('ticketDetail.loading')}</p>;
   if (isError || !data) return <p className="text-sm text-red-600">{t('ticketDetail.notFound')}</p>;
 
@@ -36,9 +51,31 @@ export function TicketDetailPage() {
             {t('ticketDetail.ticketHeading', { number: ticket.ticketNumber })}{' '}
             <span className="font-mono">{ticket.plate}</span>
           </h1>
-          <div className="mt-1">
+          <div className="mt-1 flex items-center gap-2">
             <StatusBadge ticket={ticket} />
           </div>
+          {ticket.reweighOfTicketId != null && (
+            <p className="mt-1 text-sm text-amber-700">
+              {t('ticketDetail.reweighOf', {
+                number: originalTicketQuery.data?.ticket.ticketNumber ?? ticket.reweighOfTicketId,
+              })}
+              {' — '}
+              <Link to={`/tickets/${ticket.reweighOfTicketId}`} className="underline">
+                {t('common.view')}
+              </Link>
+            </p>
+          )}
+          {ticket.reweighedByTicketId != null && (
+            <p className="mt-1 text-sm text-amber-700">
+              {t('ticketDetail.reweighedBy', {
+                number: reweighTicketQuery.data?.ticket.ticketNumber ?? ticket.reweighedByTicketId,
+              })}
+              {' — '}
+              <Link to={`/tickets/${ticket.reweighedByTicketId}`} className="underline">
+                {t('common.view')}
+              </Link>
+            </p>
+          )}
         </div>
         <ReprintButton ticket={ticket} />
       </div>

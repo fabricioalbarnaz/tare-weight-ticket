@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, real, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 export const TICKET_STATUSES = ['OPEN', 'CLOSED', 'ANOMALY'] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
@@ -26,6 +26,17 @@ export const tickets = sqliteTable('tickets', {
   printedAt: integer('printed_at', { mode: 'timestamp_ms' }),
   createdByAdmin: integer('created_by_admin', { mode: 'boolean' }).notNull().default(false),
   notes: text('notes'),
+
+  /**
+   * Set on a ticket created to correct a prior exit weight without a new
+   * entrance weighing (truck re-enters through another gate, adjusts load,
+   * re-weighs exit only) — points at the original CLOSED ticket whose entry
+   * weight/time this one reused. See master plan §5/§11 "Exit re-weigh" and
+   * docs/plans/2026-11-12-exit-reweigh-plan.md.
+   */
+  reweighOfTicketId: integer('reweigh_of_ticket_id').references((): AnySQLiteColumn => tickets.id),
+  /** Set on the original ticket once a re-weigh ticket supersedes it — the inverse of `reweighOfTicketId`, kept on both rows so either can be found from the other. */
+  reweighedByTicketId: integer('reweighed_by_ticket_id').references((): AnySQLiteColumn => tickets.id),
 
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),

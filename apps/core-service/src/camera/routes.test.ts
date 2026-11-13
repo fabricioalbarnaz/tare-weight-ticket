@@ -634,6 +634,48 @@ describe('duplicate plate debounce', () => {
   });
 });
 
+// See docs/plans/2026-11-12-exit-reweigh-plan.md and master plan §5/§11.
+describe('exit re-weigh', () => {
+  it('prints and signals the driver again on a re-weigh, same as a normal exit close', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'RWG0001' });
+
+    nextScaleReading = { weightKg: 19500, weightCaptureFailed: false };
+    const firstExit = await postExit({ plate: 'RWG0001' });
+    expect(firstExit.json().kind).toBe('ticket_closed');
+
+    // Backdate the close past both the post-release (15s) and
+    // duplicate-plate (2min) debounce windows, but still inside the
+    // default 2h re-weigh window, so this test exercises the re-weigh path
+    // itself rather than getting swallowed by an unrelated debounce.
+    const originalTicket = repo.findById(firstExit.json().ticketId)!;
+    repo.correctExit(originalTicket.id, {
+      exitAt: new Date(Date.now() - 5 * 60 * 1000),
+      exitWeightKg: originalTicket.exitWeightKg,
+      exitCameraId: originalTicket.exitCameraId,
+      exitCaptureFailed: false,
+    });
+
+    driverSignalCalls = [];
+    printCalls = 0;
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    const reweighResponse = await postExit({ plate: 'RWG0001' });
+
+    expect(reweighResponse.json().kind).toBe('ticket_reweighed');
+    expect(driverSignalCalls).toEqual(['out']);
+    expect(printCalls).toBe(1);
+
+    const reweighTicket = repo.findById(reweighResponse.json().ticketId);
+    expect(reweighTicket?.status).toBe('CLOSED');
+    expect(reweighTicket?.printedAt).not.toBeNull();
+    expect(reweighTicket?.reweighOfTicketId).toBe(originalTicket.id);
+    expect(reweighTicket?.entryWeightKg).toBe(20000);
+    expect(reweighTicket?.netWeightKg).toBe(12000);
+
+    expect(repo.findById(originalTicket.id)?.reweighedByTicketId).toBe(reweighTicket?.id);
+  });
+});
+
 // See docs/plans/2026-11-10-store-anpr-confidence-plan.md.
 describe('ANPR read confidence stored in camera raw events', () => {
   const CHAR_BELIEVE = '41,98,97,99,99,99,99';

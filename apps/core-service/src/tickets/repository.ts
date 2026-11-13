@@ -57,6 +57,8 @@ export interface CreateTicketInput {
   entryCaptureFailed: boolean;
   /** True for tickets created from scratch by an admin (master plan §3.4 manual-create flow). Defaults to false. */
   createdByAdmin?: boolean;
+  /** Set when this ticket is a re-weigh correction reusing another CLOSED ticket's entry — see master plan §5/§11 "Exit re-weigh". */
+  reweighOfTicketId?: number | null;
 }
 
 export interface UpdateEntryInput {
@@ -109,6 +111,16 @@ export interface TicketRepository {
    */
   findMostRecentEntryAtByPlate(plate: string): Date | null;
   findMostRecentExitAtByPlate(plate: string): Date | null;
+  /**
+   * The most recently CLOSED ticket for this plate (by `exitAt desc`), or
+   * undefined if none — anchors the exit re-weigh rule (master plan §5/§11,
+   * docs/plans/2026-11-12-exit-reweigh-plan.md): an exit reading with no
+   * OPEN ticket for the plate can reuse this ticket's entry weight/time
+   * instead of being flagged ANOMALY, provided it's within the configured
+   * window. Ordering by `exitAt desc` also naturally picks a prior re-weigh
+   * ticket over the one it superseded, so chained re-weighs just work.
+   */
+  findMostRecentClosedTicketByPlate(plate: string): Ticket | undefined;
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
@@ -116,6 +128,8 @@ export interface TicketRepository {
   correctExit(ticketId: number, input: CloseTicketInput): Ticket;
   markPrinted(ticketId: number, printedAt: Date): Ticket;
   flagAnomaly(input: FlagAnomalyInput): Ticket;
+  /** Marks `originalTicketId` as superseded by `newTicketId` (the re-weigh ticket) — the inverse side of `CreateTicketInput.reweighOfTicketId`. */
+  linkReweigh(originalTicketId: number, newTicketId: number): void;
   appendAuditLog(ticketId: number, actor: string, action: string, payload?: unknown): void;
   recordRawEvent(source: RawEventSource, rawPayload: unknown, linkedTicketId?: number): void;
   /**
@@ -295,6 +309,16 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
       return row?.exitAt ?? null;
     },
 
+    findMostRecentClosedTicketByPlate(plate) {
+      return db
+        .select()
+        .from(tickets)
+        .where(and(eq(tickets.plate, plate), eq(tickets.status, 'CLOSED'), isNotNull(tickets.exitAt)))
+        .orderBy(desc(tickets.exitAt))
+        .limit(1)
+        .get();
+    },
+
     findLastEventTimestamp(source) {
       const row = db
         .select()
@@ -319,6 +343,7 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
           entryCameraId: input.entryCameraId,
           entryCaptureFailed: input.entryCaptureFailed,
           createdByAdmin: input.createdByAdmin ?? false,
+          reweighOfTicketId: input.reweighOfTicketId ?? null,
           createdAt: now,
           updatedAt: now,
         })
@@ -440,6 +465,20 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .get();
       events.emitChanged(flagged);
       return flagged;
+    },
+
+    linkReweigh(originalTicketId, newTicketId) {
+      const updated = db
+        .update(tickets)
+        .set({ reweighedByTicketId: newTicketId, updatedAt: new Date() })
+        .where(eq(tickets.id, originalTicketId))
+        .returning()
+        .get();
+
+      if (!updated) {
+        throw new Error(`Cannot link re-weigh: ticket ${originalTicketId} not found`);
+      }
+      events.emitChanged(updated);
     },
 
     appendAuditLog(ticketId, actor, action, payload) {

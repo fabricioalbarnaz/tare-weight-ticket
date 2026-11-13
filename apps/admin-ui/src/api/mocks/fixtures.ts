@@ -52,6 +52,8 @@ function makeTicket(partial: Partial<Ticket> & Pick<Ticket, 'plate' | 'status'>)
     netWeightKg: null,
     printedAt: null,
     createdByAdmin: false,
+    reweighOfTicketId: null,
+    reweighedByTicketId: null,
     notes: null,
     createdAt: now,
     updatedAt: now,
@@ -181,7 +183,38 @@ function buildInitialStore(): FixtureStore {
     suspectWeight: true,
   });
 
-  const tickets = [open, closed, anomaly, needsAttention, historical, suspect];
+  // Exit re-weigh pair (master plan §5/§11, docs/plans/2026-11-12-exit-reweigh-plan.md):
+  // the truck under-loaded on the first exit, went around, and re-weighed
+  // the exit only — reusing the original's entry weight/time. Both tickets
+  // link to each other.
+  const reweighOriginal = makeTicket({
+    plate: 'RWG4321',
+    status: 'CLOSED',
+    entryAt: hoursAgo(2.5),
+    entryWeightKg: 20000,
+    entryCameraId: 'cam-entrance-1',
+    exitAt: hoursAgo(2),
+    exitWeightKg: 19500,
+    exitCameraId: 'cam-exit-1',
+    netWeightKg: 500,
+    printedAt: hoursAgo(2),
+  });
+  const reweigh = makeTicket({
+    plate: 'RWG4321',
+    status: 'CLOSED',
+    entryAt: reweighOriginal.entryAt,
+    entryWeightKg: reweighOriginal.entryWeightKg,
+    entryCameraId: reweighOriginal.entryCameraId,
+    exitAt: hoursAgo(1.5),
+    exitWeightKg: 7300,
+    exitCameraId: 'cam-exit-2',
+    netWeightKg: 12700,
+    printedAt: hoursAgo(1.5),
+    reweighOfTicketId: reweighOriginal.id,
+  });
+  reweighOriginal.reweighedByTicketId = reweigh.id;
+
+  const tickets = [open, closed, anomaly, needsAttention, historical, suspect, reweighOriginal, reweigh];
 
   const auditLog: AuditLogEntry[] = [
     makeAuditEntry(open.id, 'system', 'entry_captured', {
@@ -226,6 +259,20 @@ function buildInitialStore(): FixtureStore {
       weightKg: suspect.exitWeightKg,
       cameraId: suspect.exitCameraId,
       attemptsUsed: 1,
+    }),
+    makeAuditEntry(reweighOriginal.id, 'system', 'entry_captured', {
+      weightKg: reweighOriginal.entryWeightKg,
+      cameraId: reweighOriginal.entryCameraId,
+    }),
+    makeAuditEntry(reweighOriginal.id, 'system', 'exit_captured', {
+      weightKg: reweighOriginal.exitWeightKg,
+      cameraId: reweighOriginal.exitCameraId,
+    }),
+    makeAuditEntry(reweighOriginal.id, 'system', 'ticket_reweighed', { newTicketId: reweigh.id }),
+    makeAuditEntry(reweigh.id, 'system', 'reweigh_ticket_created', {
+      originalTicketId: reweighOriginal.id,
+      weightKg: reweigh.exitWeightKg,
+      cameraId: reweigh.exitCameraId,
     }),
   ];
 

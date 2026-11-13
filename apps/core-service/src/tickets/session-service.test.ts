@@ -24,7 +24,7 @@ beforeEach(() => {
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
   truckRepo = createTruckRepository(db);
-  service = createSessionService(repo, truckRepo);
+  service = createSessionService(repo, truckRepo, { reweighWindowMs: 2 * 60 * 60 * 1000 });
 });
 
 afterEach(() => {
@@ -349,6 +349,183 @@ describe('SessionService — exit', () => {
     expect(result.ticket.status).toBe('ANOMALY');
     expect(result.ticket.entryAt).toBeNull();
     expect(auditActionsFor(result.ticket.id)).toEqual(['anomaly_flagged']);
+  });
+
+  describe('exit re-weigh (master plan §5/§11)', () => {
+    it('reuses the entry of a plate\'s most recently CLOSED ticket when a later exit has no OPEN ticket, within the window', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'RWG0001',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 20000,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+      const firstExit = service.handleExitReading({
+        rawPlate: 'RWG0001',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 19500, // under-loaded — this is the ticket that needs correcting
+        weightCaptureFailed: false,
+      });
+      if (firstExit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+      // Truck re-enters through another gate (no entrance webhook/weighing)
+      // and re-weighs exit only, 30 minutes later — well within the
+      // default 2h window.
+      const reweigh = service.handleExitReading({
+        rawPlate: 'RWG0001',
+        cameraId: 'cam-exit-2',
+        timestamp: new Date('2026-01-01T09:30:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:30:00Z'),
+        weightKg: 8000,
+        weightCaptureFailed: false,
+      });
+
+      expect(reweigh.kind).toBe('ticket_reweighed');
+      if (reweigh.kind !== 'ticket_reweighed') throw new Error('unreachable');
+      expect(reweigh.originalTicketId).toBe(firstExit.ticket.id);
+      expect(reweigh.ticket.id).not.toBe(firstExit.ticket.id);
+      expect(reweigh.ticket.status).toBe('CLOSED');
+      expect(reweigh.ticket.entryAt).toEqual(firstExit.ticket.entryAt);
+      expect(reweigh.ticket.entryWeightKg).toBe(20000);
+      expect(reweigh.ticket.exitWeightKg).toBe(8000);
+      expect(reweigh.ticket.netWeightKg).toBe(12000);
+      expect(reweigh.ticket.reweighOfTicketId).toBe(firstExit.ticket.id);
+      expect(auditActionsFor(reweigh.ticket.id)).toEqual(['reweigh_ticket_created']);
+
+      const original = repo.findById(firstExit.ticket.id);
+      expect(original?.reweighedByTicketId).toBe(reweigh.ticket.id);
+      expect(auditActionsFor(firstExit.ticket.id)).toEqual(['entry_captured', 'exit_captured', 'ticket_reweighed']);
+    });
+
+    it('flags an anomaly instead when the most recent CLOSED ticket for the plate is outside the re-weigh window', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'RWG0002',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 20000,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+      const firstExit = service.handleExitReading({
+        rawPlate: 'RWG0002',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 19500,
+        weightCaptureFailed: false,
+      });
+      if (firstExit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+      // 3 hours later — past the default 2h window.
+      const tooLate = service.handleExitReading({
+        rawPlate: 'RWG0002',
+        cameraId: 'cam-exit-2',
+        timestamp: new Date('2026-01-01T12:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T12:00:00Z'),
+        weightKg: 8000,
+        weightCaptureFailed: false,
+      });
+
+      expect(tooLate.kind).toBe('anomaly_flagged');
+      if (tooLate.kind !== 'anomaly_flagged') throw new Error('unreachable');
+      expect(tooLate.ticket.entryAt).toBeNull();
+
+      const original = repo.findById(firstExit.ticket.id);
+      expect(original?.reweighedByTicketId).toBeNull();
+    });
+
+    it('never re-weighs off a failed capture (falls through to anomaly instead)', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'RWG0003',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 20000,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+      const firstExit = service.handleExitReading({
+        rawPlate: 'RWG0003',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 19500,
+        weightCaptureFailed: false,
+      });
+      if (firstExit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+      const failedReweigh = service.handleExitReading({
+        rawPlate: 'RWG0003',
+        cameraId: 'cam-exit-2',
+        timestamp: new Date('2026-01-01T09:30:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:30:00Z'),
+        weightKg: null,
+        weightCaptureFailed: true,
+      });
+
+      expect(failedReweigh.kind).toBe('anomaly_flagged');
+    });
+
+    it('chains re-weighs: a second re-weigh picks the most recent (the first re-weigh), not the original', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'RWG0004',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 20000,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+      const firstExit = service.handleExitReading({
+        rawPlate: 'RWG0004',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 19500,
+        weightCaptureFailed: false,
+      });
+      if (firstExit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+      const firstReweigh = service.handleExitReading({
+        rawPlate: 'RWG0004',
+        cameraId: 'cam-exit-2',
+        timestamp: new Date('2026-01-01T09:30:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:30:00Z'),
+        weightKg: 9000,
+        weightCaptureFailed: false,
+      });
+      if (firstReweigh.kind !== 'ticket_reweighed') throw new Error('unreachable');
+
+      const secondReweigh = service.handleExitReading({
+        rawPlate: 'RWG0004',
+        cameraId: 'cam-exit-3',
+        timestamp: new Date('2026-01-01T10:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T10:00:00Z'),
+        weightKg: 8000,
+        weightCaptureFailed: false,
+      });
+
+      expect(secondReweigh.kind).toBe('ticket_reweighed');
+      if (secondReweigh.kind !== 'ticket_reweighed') throw new Error('unreachable');
+      expect(secondReweigh.originalTicketId).toBe(firstReweigh.ticket.id);
+
+      // The original's reweighedByTicketId still points to the first
+      // re-weigh (set when that one was created) — only the first
+      // re-weigh's own reweighedByTicketId advances to the second.
+      const original = repo.findById(firstExit.ticket.id);
+      expect(original?.reweighedByTicketId).toBe(firstReweigh.ticket.id);
+      const firstReweighReloaded = repo.findById(firstReweigh.ticket.id);
+      expect(firstReweighReloaded?.reweighedByTicketId).toBe(secondReweigh.ticket.id);
+    });
   });
 
   it('leaves the ticket OPEN (never closes without a captured weight) on an exit scale timeout', () => {

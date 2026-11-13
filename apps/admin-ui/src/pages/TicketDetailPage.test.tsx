@@ -33,6 +33,24 @@ describe('TicketDetailPage', () => {
     });
   });
 
+  // See docs/plans/2026-11-12-exit-reweigh-plan.md and master plan §5/§11.
+  // Fixture ids 7/8 (ticketNumber #1007/#1008) are the re-weigh pair.
+  it('shows a link to the re-weigh ticket on the original, and back on the re-weigh', async () => {
+    renderApp({ route: '/tickets/7' });
+    const user = await loginAsAdmin();
+
+    await screen.findByRole('heading', { name: /ticket #1007/i });
+    await waitFor(() => {
+      expect(screen.getByText(/superseded by re-weigh ticket #1008/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('link', { name: /view/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /ticket #1008/i })).toBeInTheDocument();
+      expect(screen.getByText(/re-weigh of ticket #1007/i)).toBeInTheDocument();
+    });
+  });
+
   it('reprints a closed ticket after confirmation', async () => {
     renderApp({ route: '/tickets/2' });
     const user = await loginAsAdmin();

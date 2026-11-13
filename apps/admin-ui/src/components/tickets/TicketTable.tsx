@@ -52,6 +52,14 @@ export function TicketTable({
                   ⚠ {t('tickets.table.suspectWeightShort')}
                 </span>
               )}
+              {ticket.reweighOfTicketId != null && (
+                <span
+                  className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                  title={t('tickets.table.reweigh')}
+                >
+                  {t('tickets.table.reweighShort')}
+                </span>
+              )}
             </td>
             <td className="py-2 pr-4">
               <StatusBadge ticket={ticket} />

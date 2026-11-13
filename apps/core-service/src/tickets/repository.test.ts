@@ -716,6 +716,116 @@ describe('TicketRepository', () => {
     });
   });
 
+  describe('findMostRecentClosedTicketByPlate', () => {
+    it('returns undefined when the plate has no CLOSED ticket', () => {
+      repo.create({
+        plate: 'RWG0001',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentClosedTicketByPlate('RWG0001')).toBeUndefined();
+    });
+
+    it('ignores an ANOMALY ticket for the plate (never CLOSED, so never a re-weigh base)', () => {
+      repo.flagAnomaly({
+        plate: 'RWG0002',
+        exitAt: new Date(),
+        exitWeightKg: 5000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentClosedTicketByPlate('RWG0002')).toBeUndefined();
+    });
+
+    it('returns the most recently closed ticket for that plate, by exitAt, ignoring other plates', () => {
+      const first = repo.create({
+        plate: 'RWG0003',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(first.id, {
+        exitAt: new Date('2026-01-01T09:00:00Z'),
+        exitWeightKg: 8000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      const second = repo.create({
+        plate: 'RWG0003',
+        entryAt: new Date('2026-01-02T08:00:00Z'),
+        entryWeightKg: 21000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      const secondClosed = repo.close(second.id, {
+        exitAt: new Date('2026-01-02T09:00:00Z'),
+        exitWeightKg: 9000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      const other = repo.create({
+        plate: 'RWG0004',
+        entryAt: new Date('2026-01-03T08:00:00Z'),
+        entryWeightKg: 22000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(other.id, {
+        exitAt: new Date('2026-01-03T09:00:00Z'),
+        exitWeightKg: 10000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      expect(repo.findMostRecentClosedTicketByPlate('RWG0003')).toEqual(secondClosed);
+    });
+  });
+
+  describe('linkReweigh / create with reweighOfTicketId', () => {
+    it('sets reweighOfTicketId on the new ticket and reweighedByTicketId on the original', () => {
+      const original = repo.create({
+        plate: 'RWG0005',
+        entryAt: new Date('2026-01-01T08:00:00Z'),
+        entryWeightKg: 20000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      const closedOriginal = repo.close(original.id, {
+        exitAt: new Date('2026-01-01T09:00:00Z'),
+        exitWeightKg: 8000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      const reweigh = repo.create({
+        plate: 'RWG0005',
+        entryAt: closedOriginal.entryAt!,
+        entryWeightKg: closedOriginal.entryWeightKg,
+        entryCameraId: closedOriginal.entryCameraId,
+        entryCaptureFailed: false,
+        reweighOfTicketId: closedOriginal.id,
+      });
+
+      expect(reweigh.reweighOfTicketId).toBe(closedOriginal.id);
+      expect(reweigh.reweighedByTicketId).toBeNull();
+
+      repo.linkReweigh(closedOriginal.id, reweigh.id);
+
+      expect(repo.findById(closedOriginal.id)?.reweighedByTicketId).toBe(reweigh.id);
+    });
+
+    it('throws when linking a re-weigh to a ticket id that does not exist', () => {
+      expect(() => repo.linkReweigh(999999, 1)).toThrow(/999999/);
+    });
+  });
+
   describe('ticket change events', () => {
     it('emits a change event for every mutating method', () => {
       const changes: Ticket[] = [];

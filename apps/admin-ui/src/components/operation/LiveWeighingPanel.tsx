@@ -13,7 +13,11 @@ import { formatWeight } from '../../lib/datetime';
 /** How long the result stays on screen before the panel clears itself for the next reading. */
 const AUTO_CLEAR_MS = 7000;
 
-const CLOSING_OUTCOMES = new Set<WeighingResultEvent['outcome']>(['ticket_closed', 'ticket_closed_via_tare']);
+const CLOSING_OUTCOMES = new Set<WeighingResultEvent['outcome']>([
+  'ticket_closed',
+  'ticket_closed_via_tare',
+  'ticket_reweighed',
+]);
 
 type PanelState =
   | { phase: 'idle' }

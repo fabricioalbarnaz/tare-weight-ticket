@@ -143,6 +143,8 @@ Each balance PC runs one self-contained stack:
 | ticket_number | sequential, human-facing |
 | printed_at | nullable |
 | created_by_admin | bool, true if manually created/fixed |
+| reweigh_of_ticket_id | nullable, self-FK — set on a ticket created by the exit re-weigh rule (§5/§11), pointing at the original `CLOSED` ticket whose entry it reused |
+| reweighed_by_ticket_id | nullable, self-FK — the inverse of `reweigh_of_ticket_id`, set on the original ticket once a re-weigh ticket supersedes it |
 | notes | admin free text, nullable |
 
 `ticket_audit_log`
@@ -284,6 +286,28 @@ the Admin UI for context.
   connection. An unreadable plate never preempts (camera noise must not
   kill a legitimate weighing), and a re-read of the same plate doesn't
   either (existing last-write-wins rules apply). See §11.
+- **Exit re-weigh (2026-11-12):** a deliberate, narrow exception to the "exit
+  with no OPEN ticket is always ANOMALY, never guessed" rule above, for a
+  real operational flow: a truck weighs entry and exit normally, the ticket
+  closes and prints, but it turns out under-loaded; the driver loops back
+  through a *different* gate (no new entrance weighing, so no OPEN ticket
+  is ever created for the retry) and re-weighs the exit only, to correct it.
+  When an exit reading arrives with no OPEN ticket for its plate, **and** a
+  successful weight was captured (a failed capture always falls through to
+  ANOMALY — there's no new weight to reuse), the system now looks for that
+  plate's most recently `CLOSED` ticket (by `exitAt`, across any plate
+  history, never just the original — this also makes a second re-weigh of
+  an already-re-weighed ticket chain onto the latest one, not the original).
+  If one exists and its `exitAt` is within `EXIT_REWEIGH_WINDOW_MS` (default
+  2h) of now, a **new** ticket is created reusing that ticket's entry
+  weight/time, then closed immediately with the new exit reading — printed
+  and signaled exactly like a normal exit close. Both tickets are marked so
+  the correction is visible and traceable in the Admin UI without touching
+  `raw_events`/audit log: the new ticket's `reweighOfTicketId` points at the
+  original, and the original's `reweighedByTicketId` points back at the new
+  ticket, set together in the same transaction. Outside the window, or with
+  no CLOSED ticket for that plate at all, the reading still falls through to
+  the ordinary ANOMALY path, unchanged. See §11.
 - **Print** happens automatically exactly once per ticket transition into
   `CLOSED`, tracked via `printed_at` to avoid duplicate prints from retries;
   Admin UI can force a reprint explicitly.
@@ -1528,3 +1552,71 @@ merge per `CLAUDE.md`):
   var rather than hardcoded.
 - See `docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md`;
   delete it once this entry is merged.
+
+### Exit re-weigh (2026-11-12)
+
+- **User-reported real flow**: a truck weighs entry and exit normally, the
+  ticket closes and auto-prints, but turns out under-loaded. The driver
+  loops back through a **different** gate, adjusts the load, and re-weighs
+  the exit only — that second gate has no entrance camera, so no new
+  entrance weighing happens and no `OPEN` ticket is ever created for the
+  retry. Before this change, that second exit reading would always be
+  flagged `ANOMALY` by the existing "exit with no `OPEN` ticket is never
+  guessed at" rule (§5) — correct in general, but wrong for this specific,
+  recurring operational case.
+- **Decision**: a narrow, deliberate exception, confirmed with the user
+  before implementation (three explicit design points: mark *both* tickets
+  so the correction is visible from either one; make the time window
+  configurable, not hardcoded; when more than one `CLOSED` ticket for the
+  plate qualifies — i.e. a re-weigh of an already-re-weighed ticket — always
+  pick the most recent one, chaining naturally rather than always pointing
+  back at the original).
+- **Where it lives**: `handleExitReading`'s existing "no `OPEN` ticket"
+  branch in `tickets/session-service.ts`. A failed weight capture never
+  qualifies (nothing new to reuse) and falls straight through to the
+  existing `ANOMALY` path, unchanged. Otherwise, `TicketRepository` gained
+  `findMostRecentClosedTicketByPlate(plate)` (`tickets/repository.ts`,
+  `status = 'CLOSED' AND exitAt IS NOT NULL`, `ORDER BY exitAt DESC LIMIT
+  1`) — ordering by `exitAt desc` is what makes the "always the most
+  recent" chaining requirement fall out for free, with no extra logic. If a
+  candidate exists and its `exitAt` is within the configurable window of
+  now, a new ticket is created reusing that candidate's `entryAt`/
+  `entryWeightKg`/`entryCameraId`/`entryCaptureFailed`, then closed
+  immediately with the just-captured exit weight — a new `ExitResult` kind,
+  `ticket_reweighed`, returned alongside the existing kinds. `camera/
+  routes.ts` treats it exactly like `ticket_closed` for printing
+  (`printService.printIfNeeded`); the driver signal already fires via the
+  existing `else` branch there, since this path only triggers when
+  `weightCaptureFailed` is false.
+- **Linking (both ways, same transaction)**: `tickets` gained two nullable
+  self-referencing columns, `reweigh_of_ticket_id` (set on the new ticket,
+  pointing at the original) and `reweighed_by_ticket_id` (set on the
+  original via a new `TicketRepository.linkReweigh(originalId, newId)`,
+  pointing at the new ticket) — see §4. Both audit logs are written in the
+  same transaction as the rest of the close (`reweigh_ticket_created` on
+  the new ticket, `ticket_reweighed` on the original).
+- **Config**: `EXIT_REWEIGH_WINDOW_MS` (`tickets/config.ts`,
+  `loadTicketConfig`), default **7200000ms (2h)**, same
+  `parsePositiveInt`-backed pattern as the camera debounce windows.
+  `createSessionService` now takes this config as a required third
+  argument; `app.ts` wires it from `loadTicketConfig()`.
+- **Admin UI**: `Ticket` gained `reweighOfTicketId`/`reweighedByTicketId`
+  (`admin-ui/src/api/types.ts`). `TicketDetailPage` shows a link to the
+  other ticket in the pair (fetching it once just to resolve its
+  human-facing `ticketNumber` for the link text, since the field itself
+  only stores the id); `TicketTable` shows a small "re-weigh" badge next to
+  the plate, same visual treatment as the existing `suspectWeight` badge.
+  The live weighing panel's `CLOSING_OUTCOMES` set (`operation/
+  LiveWeighingPanel.tsx`, and its mirrored `WeighingOutcome` type in
+  `lib/useWeighingEvents.ts` and `camera/weighing-events.ts`) now includes
+  `ticket_reweighed`, so it renders with the normal success styling rather
+  than falling through unhandled.
+- **Explicitly out of scope for now** (not blocking, flagged for a future
+  revisit if it matters in practice): a failed capture on what would
+  otherwise be a re-weigh still becomes a plain `ANOMALY`, with no special
+  handling; and nothing stops reusing the entry of a `CLOSED` ticket that
+  was itself closed via an internal truck's registered tare (§11 "internal
+  trucks") — not the reported use case, not worth the extra query
+  complexity yet.
+- See `docs/plans/2026-11-12-exit-reweigh-plan.md`; delete it once this
+  entry is merged.

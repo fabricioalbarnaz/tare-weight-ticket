@@ -4,7 +4,8 @@
     "yes": "Yes",
     "no": "No",
     "cancel": "Cancel",
-    "backToDashboard": "← Back to dashboard"
+    "backToDashboard": "← Back to dashboard",
+    "view": "View"
   },
   "language": {
     "label": "Language",
@@ -109,6 +110,8 @@
     "netWeight": "Net weight",
     "printedAt": "Printed at",
     "createdByAdmin": "Created by admin",
+    "reweighOf": "Re-weigh of ticket #{{number}}",
+    "reweighedBy": "Superseded by re-weigh ticket #{{number}}",
     "auditTrail": "Audit trail"
   },
   "unresolvedEvents": {
@@ -309,7 +312,9 @@
       "netWeight": "Net weight",
       "empty": "No tickets found.",
       "suspectWeightShort": "Check weight",
-      "suspectWeight": "A scale reading for this ticket only resolved after a retry — double-check it wasn't crossed with another truck on the scale around the same time."
+      "suspectWeight": "A scale reading for this ticket only resolved after a retry — double-check it wasn't crossed with another truck on the scale around the same time.",
+      "reweighShort": "Re-weigh",
+      "reweigh": "This ticket re-weighs the exit of a previously closed ticket for the same plate."
     },
     "filters": {
       "searchPlaceholder": "Search by plate…"

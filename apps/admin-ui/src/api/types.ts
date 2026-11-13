@@ -34,6 +34,11 @@ export interface Ticket {
   createdByAdmin: boolean;
   notes: string | null;
 
+  /** Set when this ticket is a re-weigh correction — points at the original CLOSED ticket whose entry it reused. See master plan §5/§11 "Exit re-weigh". */
+  reweighOfTicketId: number | null;
+  /** Set on the original ticket once a re-weigh ticket supersedes it — the inverse of `reweighOfTicketId`. */
+  reweighedByTicketId: number | null;
+
   createdAt: string;
   updatedAt: string;
 
