@@ -176,7 +176,6 @@
     "actions": {
       "entry_captured": "Entrada capturada",
       "entry_capture_failed": "Falha ao capturar entrada",
-      "entry_overwritten": "Entrada sobrescrita (novo disparo)",
       "exit_captured": "Saída capturada",
       "exit_capture_failed": "Falha ao capturar saída",
       "anomaly_flagged": "Marcado como anomalia",

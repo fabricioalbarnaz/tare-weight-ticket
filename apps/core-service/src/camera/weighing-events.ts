@@ -21,7 +21,6 @@ export interface PlateReceivedEvent {
 
 export type WeighingOutcome =
   | 'ticket_opened'
-  | 'ticket_retriggered'
   | 'ticket_closed'
   | 'ticket_closed_via_tare'
   | 'ticket_reweighed'

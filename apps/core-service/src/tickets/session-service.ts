@@ -8,7 +8,6 @@ import type { Ticket, TicketRepository } from './repository.js';
 export const TICKET_AUDIT_ACTIONS = {
   ENTRY_CAPTURED: 'entry_captured',
   ENTRY_CAPTURE_FAILED: 'entry_capture_failed',
-  ENTRY_OVERWRITTEN: 'entry_overwritten',
   EXIT_CAPTURED: 'exit_captured',
   EXIT_CAPTURE_FAILED: 'exit_capture_failed',
   ANOMALY_FLAGGED: 'anomaly_flagged',
@@ -50,7 +49,6 @@ export interface EntranceReadingInput {
 
 export type EntranceResult =
   | { kind: 'ticket_opened'; ticket: Ticket }
-  | { kind: 'ticket_retriggered'; ticket: Ticket }
   /** Internal truck (master plan §11): the entrance leg was the real weighing, the exit leg came from the active conjunto's tare — ticket closes immediately. */
   | { kind: 'ticket_closed_via_tare'; ticket: Ticket }
   | { kind: 'plate_unreadable' };
@@ -177,32 +175,21 @@ export function createSessionService(
       }
 
       return repo.transaction((): EntranceResult => {
-        const existing = repo.findOpenByPlate(plate);
         const action = input.weightCaptureFailed
           ? TICKET_AUDIT_ACTIONS.ENTRY_CAPTURE_FAILED
-          : existing
-            ? TICKET_AUDIT_ACTIONS.ENTRY_OVERWRITTEN
-            : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED;
+          : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED;
 
-        const ticket = existing
-          ? repo.updateEntry(existing.id, {
-              entryAt: input.weighingFinishedAt,
-              entryWeightKg: input.weightKg,
-              entryCameraId: input.cameraId,
-              entryCaptureFailed: input.weightCaptureFailed,
-            })
-          : repo.create({
-              plate,
-              entryAt: input.weighingFinishedAt,
-              entryWeightKg: input.weightKg,
-              entryCameraId: input.cameraId,
-              entryCaptureFailed: input.weightCaptureFailed,
-            });
+        const ticket = repo.create({
+          plate,
+          entryAt: input.weighingFinishedAt,
+          entryWeightKg: input.weightKg,
+          entryCameraId: input.cameraId,
+          entryCaptureFailed: input.weightCaptureFailed,
+        });
 
         repo.appendAuditLog(ticket.id, 'system', action, {
           weightKg: input.weightKg,
           cameraId: input.cameraId,
-          isRetrigger: Boolean(existing),
           attemptsUsed: input.attemptsUsed,
         });
         repo.recordRawEvent(
@@ -222,7 +209,7 @@ export function createSessionService(
           ticket.id,
         );
 
-        return { kind: existing ? 'ticket_retriggered' : 'ticket_opened', ticket };
+        return { kind: 'ticket_opened', ticket };
       });
     },
 

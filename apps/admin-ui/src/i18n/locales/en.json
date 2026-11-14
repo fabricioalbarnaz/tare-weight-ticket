@@ -176,7 +176,6 @@
     "actions": {
       "entry_captured": "Entry captured",
       "entry_capture_failed": "Entry capture failed",
-      "entry_overwritten": "Entry overwritten (re-trigger)",
       "exit_captured": "Exit captured",
       "exit_capture_failed": "Exit capture failed",
       "anomaly_flagged": "Flagged as anomaly",

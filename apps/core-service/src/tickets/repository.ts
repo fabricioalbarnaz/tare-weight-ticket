@@ -84,6 +84,13 @@ export interface FlagAnomalyInput {
 }
 
 export interface TicketRepository {
+  /**
+   * The most recently opened `OPEN` ticket for a plate. More than one `OPEN`
+   * ticket can exist for the same plate (each entrance reading opens a new
+   * one — see docs/plans/2026-11-14-entrance-no-overwrite-plan.md) — an exit
+   * always resolves against the latest, leaving any earlier one `OPEN`
+   * until an admin resolves it.
+   */
   findOpenByPlate(plate: string): Ticket | undefined;
   findById(ticketId: number): Ticket | undefined;
   listTickets(query: ListTicketsQuery): Paginated<TicketListItem>;
@@ -193,6 +200,8 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .select()
         .from(tickets)
         .where(and(eq(tickets.plate, plate), eq(tickets.status, 'OPEN')))
+        .orderBy(desc(tickets.entryAt), desc(tickets.id))
+        .limit(1)
         .get();
     },
 

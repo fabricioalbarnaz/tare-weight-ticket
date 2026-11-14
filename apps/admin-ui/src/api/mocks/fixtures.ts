@@ -252,7 +252,6 @@ function buildInitialStore(): FixtureStore {
     makeAuditEntry(suspect.id, 'system', 'entry_captured', {
       weightKg: suspect.entryWeightKg,
       cameraId: suspect.entryCameraId,
-      isRetrigger: false,
       attemptsUsed: 3,
     }),
     makeAuditEntry(suspect.id, 'system', 'exit_captured', {

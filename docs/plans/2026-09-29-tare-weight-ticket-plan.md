@@ -37,7 +37,7 @@ a larger platform — optimize for simplicity and reliability, not scale-out.
 | Driver "go" signal | Not decided by stakeholder — system will define a **pluggable signal adapter**, defaulting to a network-triggered relay (see §4.5) |
 | Connectivity | Balance PC **has internet access** (not a hard offline requirement, but system must not depend on it for core flow) |
 | Admin UI access | Local web app, reachable from **other PCs on the same LAN**, not just the balance PC itself |
-| Duplicate/misread handling | A misread/unreadable plate can **only** be fixed by an admin. A **re-trigger of the same open entrance** replaces the record with the most recent reading (last-write-wins for the entrance leg only) |
+| Duplicate/misread handling | A misread/unreadable plate can **only** be fixed by an admin. **Reversed 2026-11-14** (see §11): a second entrance reading for a plate that already has an `OPEN` ticket no longer overwrites it — it opens a brand-new `OPEN` ticket instead. An exit still matches against an `OPEN` ticket for the plate, now picking the **most recently opened** one if more than one exists; any older `OPEN` ticket left behind stays `OPEN` indefinitely, with no automatic flag — resolved manually by an admin like any other stuck ticket |
 | Ticket fields | Plate, entry date/time, exit date/time, entry weight, exit weight, net weight difference, plus the contracting company's logo (header graphic) — **updated 2026-11-05**, see §11; originally "nothing else" before the logo was requested |
 | Central reporting | Not needed now. Each balance stays independent, but design should leave room for a **future** central admin UI aggregating multiple balances (not built in this phase) |
 | Backend stack | Node.js / TypeScript (stakeholder preference) |
@@ -191,12 +191,13 @@ the Admin UI for context.
   - No open ticket for `X` → create new `OPEN` ticket, start scale read
     (wait for stable weight), fill `entry_weight_kg`/`entry_at`, trigger
     driver signal.
-  - Open ticket already exists for `X` → **replace** its entry weight/time
-    with the new reading (last-write-wins, per stakeholder decision), log to
-    `ticket_audit_log`. **Correction (2026-11-12):** this only applies once
-    the duplicate-plate debounce window below has passed — a retrigger
-    *inside* that window is discarded outright instead, never reaching this
-    rule.
+  - Open ticket already exists for `X` → **Reversed 2026-11-14** (see §11):
+    no longer overwritten. A **new** `OPEN` ticket is created instead,
+    independent of the existing one, with its own entry weight/time, logged
+    to `ticket_audit_log` exactly like a fresh entrance. This only matters
+    once the duplicate-plate debounce window below has passed — a reading
+    *inside* that window is still discarded outright instead (added
+    2026-11-12), never reaching this rule.
   - Plate unreadable/empty from camera payload → log to `raw_events` only,
     create nothing automatically, surface in Admin UI as an unresolved
     camera event needing manual ticket creation.
@@ -229,7 +230,10 @@ the Admin UI for context.
 - **Exit camera fires** for plate `X`:
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
-    print job.
+    print job. **Updated 2026-11-14:** since more than one `OPEN` ticket can
+    now exist for the same plate (see the entrance rule above), "the open
+    ticket" means the **most recently opened** one; any earlier `OPEN`
+    ticket for `X` is left untouched and stays `OPEN`.
   - No open ticket for `X` → flag as `ANOMALY` raw event (truck leaving
     without a recorded entrance) — do **not** guess; needs admin
     resolution. Do not print automatically.
@@ -1620,3 +1624,43 @@ merge per `CLAUDE.md`):
   complexity yet.
 - See `docs/plans/2026-11-12-exit-reweigh-plan.md`; delete it once this
   entry is merged.
+
+### Entrance stops overwriting an open ticket (2026-11-14) — reverses the original last-write-wins decision
+
+- **Decision, confirmed with the user**: a second entrance reading for a
+  plate that already has an `OPEN` ticket no longer overwrites it
+  (last-write-wins, the original §4/§5 rule) — it now always opens a
+  **second, independent** `OPEN` ticket. Every entrance reading is
+  preserved as its own ticket instead of silently replacing the previous
+  one's entry data.
+- **Why the reversal**: the old rule meant a truck that triggers the
+  entrance camera twice (e.g. it backs out and re-enters properly after a
+  gate malfunction) lost its first weighing with no record it ever
+  happened as a distinct event — just an overwritten audit log entry on
+  the same ticket. The user wants each entrance preserved.
+- **Exit side**: unchanged in spirit — it still matches against the `OPEN`
+  ticket for the plate — but since more than one can now exist for the
+  same plate, `TicketRepository.findOpenByPlate` was changed from a bare,
+  unordered `.get()` (safe only because at most one `OPEN` row per plate
+  could ever exist before) to `ORDER BY entryAt DESC, id DESC LIMIT 1`, so
+  it resolves to the **most recently opened** one.
+- **Deliberately no cleanup/flag for the orphaned older ticket**: once an
+  exit closes the newer of two `OPEN` tickets for a plate, the older one
+  is left `OPEN` indefinitely — no automatic `ANOMALY` flag, no timeout,
+  no Admin UI callout beyond it simply showing up as a long-stale `OPEN`
+  ticket. Confirmed explicitly with the user: this is acceptable, resolved
+  manually by an admin like any other stuck ticket, same as an
+  `exit_capture_pending` ticket today.
+- **Unaffected**: the 2-minute same-plate/same-direction camera debounce
+  (`CAMERA_DUPLICATE_PLATE_DEBOUNCE_MS`, "Same-plate duplicate camera read
+  debounce" above) is still the only guard against an accidental duplicate
+  ticket from camera flicker/re-trigger within that window — past it, a
+  second entrance reading is now a deliberate new ticket, not an update.
+  The internal-truck active-tare path and the exit re-weigh rule above
+  don't call `findOpenByPlate` for entrances and are unaffected.
+- **Removed**: the `ENTRY_OVERWRITTEN` audit action, the `ticket_retriggered`
+  `EntranceResult`/`WeighingOutcome` kind, and the `isRetrigger` audit-log
+  payload field — there is no overwrite case left to log differently from a
+  plain `entry_captured`.
+- See `docs/plans/2026-11-14-entrance-no-overwrite-plan.md`; delete it once
+  this entry is merged.

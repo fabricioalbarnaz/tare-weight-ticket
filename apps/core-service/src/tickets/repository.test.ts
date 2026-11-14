@@ -88,7 +88,7 @@ describe('TicketRepository', () => {
     expect(found?.id).toBe(created.id);
   });
 
-  it('overwrites entry data on updateEntry (retrigger case)', () => {
+  it('overwrites entry data on updateEntry (admin manual-edit path)', () => {
     const created = repo.create({
       plate: 'RET1234',
       entryAt: new Date('2026-01-01T10:00:00Z'),
@@ -107,8 +107,27 @@ describe('TicketRepository', () => {
     expect(updated.id).toBe(created.id);
     expect(updated.entryWeightKg).toBe(1100);
     expect(updated.status).toBe('OPEN');
-    // Still findable as the single open ticket for the plate — not duplicated.
     expect(repo.findOpenByPlate('RET1234')?.id).toBe(created.id);
+  });
+
+  it('findOpenByPlate returns the most recently opened ticket when more than one is OPEN for a plate', () => {
+    const older = repo.create({
+      plate: 'STACK002',
+      entryAt: new Date('2026-01-01T08:00:00Z'),
+      entryWeightKg: 1000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+    const newer = repo.create({
+      plate: 'STACK002',
+      entryAt: new Date('2026-01-01T08:05:00Z'),
+      entryWeightKg: 1100,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+
+    expect(older.status).toBe('OPEN');
+    expect(repo.findOpenByPlate('STACK002')?.id).toBe(newer.id);
   });
 
   it('refuses to updateEntry on a ticket that is no longer OPEN', () => {

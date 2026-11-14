@@ -228,14 +228,14 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(response.json().kind).toBe('ticket_opened');
   });
 
-  it('overwrites the entry on a retrigger for the same open ticket', async () => {
+  it('opens a second ticket on a second entrance for the same plate, leaving the first OPEN', async () => {
     nextScaleReading = { weightKg: 19000, weightCaptureFailed: false };
     const first = await postEntrance({ plate: 'RET1234' });
 
     // Backdate past the duplicate-plate debounce window (default 2min —
     // see docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md),
-    // which otherwise discards a same-plate/same-direction retrigger this
-    // soon instead of reaching the last-write-wins rule this test covers.
+    // which otherwise discards a same-plate/same-direction read this soon
+    // instead of reaching the new-ticket-per-entrance rule this test covers.
     const ticket = repo.findOpenByPlate('RET1234')!;
     repo.updateEntry(ticket.id, {
       entryAt: new Date(Date.now() - 130000),
@@ -247,9 +247,10 @@ describe('POST /webhooks/camera/entrance', () => {
     nextScaleReading = { weightKg: 19500, weightCaptureFailed: false };
     const second = await postEntrance({ plate: 'RET1234' });
 
-    expect(second.json().kind).toBe('ticket_retriggered');
-    expect(second.json().ticketId).toBe(first.json().ticketId);
+    expect(second.json().kind).toBe('ticket_opened');
+    expect(second.json().ticketId).not.toBe(first.json().ticketId);
     expect(repo.findOpenByPlate('RET1234')?.entryWeightKg).toBe(19500);
+    expect(repo.findById(first.json().ticketId)?.status).toBe('OPEN');
   });
 
   it('records entryCaptureFailed when the scale times out, and withholds the driver signal', async () => {
@@ -627,10 +628,13 @@ describe('duplicate plate debounce', () => {
     nextScaleReading = { weightKg: 21000, weightCaptureFailed: false };
     const response = await postEntrance({ plate: 'DUP0007' });
 
-    // The ticket is still open, so this is the existing last-write-wins
-    // retrigger path, not a fresh open — confirms it's no longer being
-    // swallowed by the duplicate-plate debounce once the window has passed.
-    expect(response.json().kind).toBe('ticket_retriggered');
+    // A second genuine entrance (not a debounced duplicate) now always
+    // opens its own ticket — see
+    // docs/plans/2026-11-14-entrance-no-overwrite-plan.md — confirms it's
+    // no longer being swallowed by the duplicate-plate debounce once the
+    // window has passed.
+    expect(response.json().kind).toBe('ticket_opened');
+    expect(response.json().ticketId).not.toBe(opened.json().ticketId);
   });
 });
 

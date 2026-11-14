@@ -102,7 +102,7 @@ describe('SessionService — entrance', () => {
     expect(result.ticket.entryAt).toEqual(new Date('2026-01-01T08:00:01Z'));
   });
 
-  it('overwrites entry data on a retrigger without creating a second ticket', () => {
+  it('opens a second ticket on a second entrance for the same plate, leaving the first OPEN', () => {
     const first = service.handleEntranceReading({
       rawPlate: 'RET1234',
       cameraId: 'cam-entrance-1',
@@ -122,12 +122,50 @@ describe('SessionService — entrance', () => {
       weightCaptureFailed: false,
     });
 
-    expect(second.kind).toBe('ticket_retriggered');
-    if (second.kind !== 'ticket_retriggered') throw new Error('unreachable');
-    expect(second.ticket.id).toBe(first.ticket.id);
+    expect(second.kind).toBe('ticket_opened');
+    if (second.kind !== 'ticket_opened') throw new Error('unreachable');
+    expect(second.ticket.id).not.toBe(first.ticket.id);
     expect(second.ticket.entryWeightKg).toBe(19500);
-    expect(repo.findOpenByPlate('RET1234')?.id).toBe(first.ticket.id);
-    expect(auditActionsFor(first.ticket.id)).toEqual(['entry_captured', 'entry_overwritten']);
+    expect(repo.findById(first.ticket.id)?.status).toBe('OPEN');
+    expect(repo.findOpenByPlate('RET1234')?.id).toBe(second.ticket.id);
+    expect(auditActionsFor(first.ticket.id)).toEqual(['entry_captured']);
+    expect(auditActionsFor(second.ticket.id)).toEqual(['entry_captured']);
+  });
+
+  it('closes the most recently opened ticket on exit when two are OPEN for the same plate, leaving the older one OPEN', () => {
+    const first = service.handleEntranceReading({
+      rawPlate: 'STACK001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 19000,
+      weightCaptureFailed: false,
+    });
+    if (first.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const second = service.handleEntranceReading({
+      rawPlate: 'STACK001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:05:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:05:00Z'),
+      weightKg: 19500,
+      weightCaptureFailed: false,
+    });
+    if (second.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const exit = service.handleExitReading({
+      rawPlate: 'STACK001',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date('2026-01-01T09:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+      weightKg: 8000,
+      weightCaptureFailed: false,
+    });
+
+    if (exit.kind !== 'ticket_closed') throw new Error('unreachable');
+    expect(exit.ticket.id).toBe(second.ticket.id);
+    expect(repo.findById(first.ticket.id)?.status).toBe('OPEN');
+    expect(repo.findById(second.ticket.id)?.status).toBe('CLOSED');
   });
 
   it('flags entry_capture_failed and stores a null weight on a scale timeout', () => {
@@ -218,7 +256,7 @@ describe('SessionService — entrance', () => {
     expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
       {
         action: 'entry_captured',
-        payload: { weightKg: 20000, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 2 },
+        payload: { weightKg: 20000, cameraId: 'cam-entrance-1', attemptsUsed: 2 },
       },
     ]);
   });
@@ -238,12 +276,12 @@ describe('SessionService — entrance', () => {
     expect(auditLogPayloadsFor(result.ticket.id)).toEqual([
       {
         action: 'entry_capture_failed',
-        payload: { weightKg: null, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 3 },
+        payload: { weightKg: null, cameraId: 'cam-entrance-1', attemptsUsed: 3 },
       },
     ]);
   });
 
-  it('records attemptsUsed in the audit log payload on a retrigger', () => {
+  it('records attemptsUsed in the audit log payload on each of two entrances for the same plate', () => {
     const first = service.handleEntranceReading({
       rawPlate: 'ATMP0003',
       cameraId: 'cam-entrance-1',
@@ -264,16 +302,18 @@ describe('SessionService — entrance', () => {
       weightCaptureFailed: false,
       attemptsUsed: 2,
     });
-    if (second.kind !== 'ticket_retriggered') throw new Error('unreachable');
+    if (second.kind !== 'ticket_opened') throw new Error('unreachable');
 
+    expect(auditLogPayloadsFor(first.ticket.id)).toEqual([
+      {
+        action: 'entry_captured',
+        payload: { weightKg: 19000, cameraId: 'cam-entrance-1', attemptsUsed: 1 },
+      },
+    ]);
     expect(auditLogPayloadsFor(second.ticket.id)).toEqual([
       {
         action: 'entry_captured',
-        payload: { weightKg: 19000, cameraId: 'cam-entrance-1', isRetrigger: false, attemptsUsed: 1 },
-      },
-      {
-        action: 'entry_overwritten',
-        payload: { weightKg: 19500, cameraId: 'cam-entrance-1', isRetrigger: true, attemptsUsed: 2 },
+        payload: { weightKg: 19500, cameraId: 'cam-entrance-1', attemptsUsed: 2 },
       },
     ]);
   });
