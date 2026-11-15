@@ -110,7 +110,7 @@
     "exitWeight": "Exit weight",
     "netWeight": "Net weight",
     "printedAt": "Printed at",
-    "createdByAdmin": "Created by admin",
+    "createdByAdmin": "Created manually",
     "reweighOf": "Re-weigh of ticket #{{number}}",
     "reweighedBy": "Superseded by re-weigh ticket #{{number}}",
     "auditTrail": "Audit trail"

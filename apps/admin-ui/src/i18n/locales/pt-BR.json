@@ -110,7 +110,7 @@
     "exitWeight": "Peso de saída",
     "netWeight": "Peso líquido",
     "printedAt": "Impresso em",
-    "createdByAdmin": "Criado pelo administrador",
+    "createdByAdmin": "Criado manualmente",
     "reweighOf": "Repesagem do ticket #{{number}}",
     "reweighedBy": "Substituído pelo ticket de repesagem #{{number}}",
     "auditTrail": "Trilha de auditoria"

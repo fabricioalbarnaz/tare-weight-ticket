@@ -27,6 +27,7 @@ export function AppRoutes() {
           <Route path="/operation" element={<OperationPage />} />
           <Route path="/account/password" element={<ChangePasswordPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
+          <Route path="/tickets/new" element={<CreateTicketPage />} />
 
           <Route element={<RequireAdmin />}>
             <Route path="/" element={<DashboardPage />} />
@@ -35,7 +36,6 @@ export function AppRoutes() {
             <Route path="/status" element={<HardwareStatusPage />} />
             <Route path="/internal-trucks" element={<InternalTrucksPage />} />
             <Route path="/internal-trucks/:id" element={<TruckDetailPage />} />
-            <Route path="/tickets/new" element={<CreateTicketPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/users/:id" element={<UserDetailPage />} />
           </Route>

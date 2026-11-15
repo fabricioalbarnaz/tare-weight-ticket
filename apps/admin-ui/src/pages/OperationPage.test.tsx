@@ -55,7 +55,14 @@ describe('OperationPage', () => {
     });
 
     expect(screen.getByRole('link', { name: '#1001' })).toHaveAttribute('href', '/tickets/1');
-    expect(screen.queryByRole('button', { name: /new ticket/i })).not.toBeInTheDocument();
+  });
+
+  // 2026-11-15: operators can now create a ticket from here too — see CreateTicketPage.test.tsx
+  // for the full create flow; just a smoke check here that the link is present and wired up.
+  it('shows a "new ticket" link to every profile', async () => {
+    await goToOperationPage();
+
+    expect(screen.getByRole('link', { name: /new ticket/i })).toHaveAttribute('href', '/tickets/new');
   });
 
   // 2026-11-14: operators can now reach a ticket's detail/edit page from here.

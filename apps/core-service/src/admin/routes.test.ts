@@ -822,24 +822,26 @@ describe('profiles and session revalidation', () => {
       expect(response.statusCode, url).toBe(403);
       expect(response.body).toBe('admin_required');
     }
-    const create = await app.inject({
+  });
+
+  it('lets an operator create, view, edit, and reprint a ticket, attributed to their own username', async () => {
+    createUser('op', 'operator');
+    const cookie = await loginCookie('op', 'user-password');
+
+    const createResponse = await app.inject({
       method: 'POST',
       url: '/api/admin/tickets',
       headers: { cookie },
       payload: {
-        plate: 'ABC1234',
+        plate: 'OPER0001',
         entryAt: '2026-01-01T08:00:00.000Z',
         entryWeightKg: 20000,
-        reason: 'x',
+        reason: 'operator created this one by hand',
       },
     });
-    expect(create.statusCode).toBe(403);
-  });
-
-  it('lets an operator view, edit, and reprint a ticket, attributed to their own username', async () => {
-    createUser('op', 'operator');
-    const cookie = await loginCookie('op', 'user-password');
-    const ticket = createOpenTicket('OPER0001');
+    expect(createResponse.statusCode).toBe(201);
+    const ticket = createResponse.json().ticket as Ticket;
+    expect(repo.findAuditLogByTicketId(ticket.id).at(-1)?.actor).toBe('op');
 
     const getResponse = await app.inject({
       method: 'GET',
@@ -878,15 +880,6 @@ describe('profiles and session revalidation', () => {
       payload: { reason: 'driver lost the original' },
     });
     expect(reprintResponse.statusCode).toBe(202);
-
-    // Still can't create one, unlike editing.
-    const createResponse = await app.inject({
-      method: 'POST',
-      url: '/api/admin/tickets',
-      headers: { cookie },
-      payload: { plate: 'OPER0002', entryAt: '2026-01-01T08:00:00.000Z', entryWeightKg: 1000, reason: 'x' },
-    });
-    expect(createResponse.statusCode).toBe(403);
   });
 
   it('applies a profile change to an already-open session immediately', async () => {

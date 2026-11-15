@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useTicketEvents } from '../lib/useTicketEvents';
 import { TicketFilters, type TicketFiltersValue } from '../components/tickets/TicketFilters';
@@ -14,9 +15,10 @@ function startOfTodayIso(): string {
 }
 
 /**
- * Ticket listing reachable by both profiles. Unlike the dashboard it has no
- * "new ticket" action, but an operator can open a ticket's detail page from
- * here to edit its entry/exit leg or reprint it (2026-11-14).
+ * Ticket listing reachable by both profiles. An operator can open a
+ * ticket's detail page from here to edit its entry/exit leg or reprint it,
+ * and (2026-11-15) create one manually too — the same actions the
+ * dashboard offers an admin.
  */
 export function OperationPage() {
   const { t } = useTranslation();
@@ -39,6 +41,12 @@ export function OperationPage() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold text-slate-900">{t('operation.title')}</h1>
+        <Link
+          to="/tickets/new"
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+        >
+          {t('dashboard.newTicket')}
+        </Link>
       </div>
 
       <LiveWeighingPanel />

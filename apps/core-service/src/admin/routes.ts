@@ -271,7 +271,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Body: CreateTicketBody }>(
         '/tickets',
-        { schema: { body: createTicketBodySchema }, preHandler: requireAdmin },
+        { schema: { body: createTicketBodySchema }, preHandler: requireAuth },
         async (request, reply) => {
           const { plate, entryAt, entryWeightKg, reason } = request.body;
           const actor = request.adminUser!.username;

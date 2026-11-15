@@ -1,7 +1,13 @@
 # Let the operator edit tickets, reusing the admin's ticket detail screen
 
-**Status:** All steps implemented and verified. Pending user review before
-deleting this plan file per `CLAUDE.md`'s workflow.
+**Status:** All steps implemented and verified. **Superseded in part
+(2026-11-15):** the user asked to also open up manual ticket creation to
+the operator — see the "Follow-up: manual ticket creation" entry added to
+the master plan's §11 for that change (same backend/frontend pattern as
+Step 1/2 here, applied to `POST /tickets` and `/tickets/new`). The
+"Explicitly unchanged" list below is accordingly out of date on that one
+point. Pending user review before deleting this plan file per
+`CLAUDE.md`'s workflow.
 
 ## Decision (requested by user, 2026-11-14)
 
