@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { expect } from 'vitest';
-import { MOCK_CREDENTIALS } from './api/mocks/fixtures';
+import { MOCK_CREDENTIALS, MOCK_OPERATOR_CREDENTIALS } from './api/mocks/fixtures';
 
 export async function loginAs(
   credentials: { username: string; password: string },
@@ -20,4 +20,8 @@ export async function loginAs(
 
 export async function loginAsAdmin(user: UserEvent = userEvent.setup()): Promise<UserEvent> {
   return loginAs(MOCK_CREDENTIALS, user);
+}
+
+export async function loginAsOperator(user: UserEvent = userEvent.setup()): Promise<UserEvent> {
+  return loginAs(MOCK_OPERATOR_CREDENTIALS, user);
 }

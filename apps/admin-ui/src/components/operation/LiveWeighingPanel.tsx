@@ -140,7 +140,7 @@ export function LiveWeighingPanel() {
 
       {closing && state.phase === 'result' && state.event.ticket && (
         <div className="mt-3 border-t border-slate-200 pt-3">
-          <TicketTable tickets={[state.event.ticket]} readOnly />
+          <TicketTable tickets={[state.event.ticket]} />
           {alert && <p className="mt-2 text-xs font-medium text-red-800">{t('operation.panel.alerts.closedNeedsAttention')}</p>}
         </div>
       )}

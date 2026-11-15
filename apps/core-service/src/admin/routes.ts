@@ -256,7 +256,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.get<{ Params: TicketIdParams }>(
         '/tickets/:id',
-        { schema: { params: ticketIdParamsSchema }, preHandler: requireAdmin },
+        { schema: { params: ticketIdParamsSchema }, preHandler: requireAuth },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const ticket = options.repo.findById(ticketId);
@@ -300,7 +300,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.patch<{ Params: TicketIdParams; Body: EditEntryBody }>(
         '/tickets/:id/entry',
-        { schema: { params: ticketIdParamsSchema, body: editEntryBodySchema }, preHandler: requireAdmin },
+        { schema: { params: ticketIdParamsSchema, body: editEntryBodySchema }, preHandler: requireAuth },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);
@@ -337,7 +337,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.patch<{ Params: TicketIdParams; Body: EditExitBody }>(
         '/tickets/:id/exit',
-        { schema: { params: ticketIdParamsSchema, body: editExitBodySchema }, preHandler: requireAdmin },
+        { schema: { params: ticketIdParamsSchema, body: editExitBodySchema }, preHandler: requireAuth },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);
@@ -385,7 +385,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
       instance.post<{ Params: TicketIdParams; Body: ReprintBody }>(
         '/tickets/:id/reprint',
-        { schema: { params: ticketIdParamsSchema, body: reprintBodySchema }, preHandler: requireAdmin },
+        { schema: { params: ticketIdParamsSchema, body: reprintBodySchema }, preHandler: requireAuth },
         async (request, reply) => {
           const ticketId = Number(request.params.id);
           const existing = options.repo.findById(ticketId);

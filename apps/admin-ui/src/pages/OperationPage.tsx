@@ -14,9 +14,9 @@ function startOfTodayIso(): string {
 }
 
 /**
- * Read-only ticket listing for the future "operador" profile (master plan —
- * no such role exists yet, so this is reachable by the current admin login
- * too). No create/edit/detail actions, unlike the dashboard — view only.
+ * Ticket listing reachable by both profiles. Unlike the dashboard it has no
+ * "new ticket" action, but an operator can open a ticket's detail page from
+ * here to edit its entry/exit leg or reprint it (2026-11-14).
  */
 export function OperationPage() {
   const { t } = useTranslation();
@@ -47,7 +47,7 @@ export function OperationPage() {
 
       {isLoading && <p className="text-sm text-slate-500">{t('operation.loadingTickets')}</p>}
       {isError && <p className="text-sm text-red-600">{t('operation.loadError')}</p>}
-      {data && <TicketTable tickets={data.items} readOnly />}
+      {data && <TicketTable tickets={data.items} />}
     </div>
   );
 }

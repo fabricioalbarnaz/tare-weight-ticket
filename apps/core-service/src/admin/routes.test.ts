@@ -836,6 +836,59 @@ describe('profiles and session revalidation', () => {
     expect(create.statusCode).toBe(403);
   });
 
+  it('lets an operator view, edit, and reprint a ticket, attributed to their own username', async () => {
+    createUser('op', 'operator');
+    const cookie = await loginCookie('op', 'user-password');
+    const ticket = createOpenTicket('OPER0001');
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: `/api/admin/tickets/${ticket.id}`,
+      headers: { cookie },
+    });
+    expect(getResponse.statusCode).toBe(200);
+
+    const editResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/tickets/${ticket.id}/entry`,
+      headers: { cookie },
+      payload: {
+        entryAt: '2026-01-01T08:05:00.000Z',
+        entryWeightKg: 19500,
+        reason: 'operator fixed a misread weight',
+      },
+    });
+    expect(editResponse.statusCode).toBe(200);
+    expect(editResponse.json().ticket.entryWeightKg).toBe(19500);
+    const auditLog = repo.findAuditLogByTicketId(ticket.id);
+    expect(auditLog.at(-1)?.actor).toBe('op');
+
+    const exitResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/tickets/${ticket.id}/exit`,
+      headers: { cookie },
+      payload: { exitAt: '2026-01-01T09:00:00.000Z', exitWeightKg: 8000, reason: 'operator closed it' },
+    });
+    expect(exitResponse.statusCode).toBe(200);
+
+    const reprintResponse = await app.inject({
+      method: 'POST',
+      url: `/api/admin/tickets/${ticket.id}/reprint`,
+      headers: { cookie },
+      payload: { reason: 'driver lost the original' },
+    });
+    expect(reprintResponse.statusCode).toBe(202);
+
+    // Still can't create one, unlike editing.
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/admin/tickets',
+      headers: { cookie },
+      payload: { plate: 'OPER0002', entryAt: '2026-01-01T08:00:00.000Z', entryWeightKg: 1000, reason: 'x' },
+    });
+    expect(createResponse.statusCode).toBe(403);
+  });
+
   it('applies a profile change to an already-open session immediately', async () => {
     const user = createUser('promoted', 'operator');
     const cookie = await loginCookie('promoted', 'user-password');

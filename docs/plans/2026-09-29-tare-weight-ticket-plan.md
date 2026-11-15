@@ -113,8 +113,9 @@ Each balance PC runs one self-contained stack:
    the LAN (`http://<balance-pc-ip>:<port>`), behind simple username/password
    auth (bcrypt-hashed password, session cookie — no need for anything
    heavier on a closed LAN). **Two profiles (2026-11-09, see §11):** `admin`
-   (everything below, plus user management) and `operator` (only the
-   read-only Operação screen). Capabilities:
+   (everything below, plus user management) and `operator` (the Operação
+   screen, from where they can also view/edit/reprint a single ticket —
+   see the 2026-11-14 update in §11). Capabilities:
    - Live table of today's tickets (open / closed / anomaly).
    - Manually create/edit an entrance or exit weight + timestamp for a
      plate, with a mandatory reason note (audit trail).
@@ -1434,6 +1435,35 @@ merge per `CLAUDE.md`):
 - **Not built (possible follow-up)**: no audit trail for user-management
   actions themselves (who created or deactivated whom). No such table
   existed before, and the user didn't ask for one.
+
+### Operator ticket edit access (2026-11-14, narrows the 2026-11-09 decision)
+
+- **Decision (user request)**: an operator can now view, edit the entry/exit
+  leg of, and reprint a single ticket — reusing the admin's own
+  `TicketDetailPage`, reached from the Operação screen's ticket table (now a
+  link for every profile, not just admin). **Creating** a ticket
+  (`/tickets/new`, `POST /tickets`) stays admin-only, as does every other
+  admin screen (dashboard, history, unresolved events, internal trucks,
+  hardware status, users).
+- **Backend**: `GET /api/admin/tickets/:id`, `PATCH .../entry`,
+  `PATCH .../exit`, and `POST .../reprint` moved from `requireAdmin` to
+  `requireAuth` in `apps/core-service/src/admin/routes.ts`. The operator's
+  route list from the 2026-11-09 entry above is accordingly wider: those
+  four plus `GET /tickets`, `GET /tickets/stream`, and the auth routes.
+  Edits still record the acting username as `actor` in the audit log
+  (`request.adminUser!.username`, unchanged), so an operator's correction is
+  attributed the same way an admin's is.
+- **Frontend**: `/tickets/:id` moved out of `<RequireAdmin />` in
+  `AppRoutes.tsx`; `OperationPage`/`LiveWeighingPanel` stopped passing
+  `readOnly` to `TicketTable`; `TicketDetailPage`'s back link is role-aware
+  (`/` for admin, `/operation` for operator).
+- **Risk accepted, flagged to the user before starting**: this removes the
+  one access control the 2026-11-09 decision put in place — any operator
+  can now rewrite a ticket's recorded entry/exit weight and timestamp
+  without an admin, albeit with a mandatory, audited reason note. Accepted
+  as scoped; see `docs/plans/2026-11-14-operator-ticket-edit-plan.md`
+  (deleted once this work is merged) for the narrower alternatives that
+  were considered and not chosen.
 
 ### Scale read preemption by a newer plate (2026-11-10)
 

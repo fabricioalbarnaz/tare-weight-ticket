@@ -248,9 +248,6 @@ repo, the `@tare/*` packages, file paths, or Docker images to match.
   finished, and clearly mark which single step is currently in development
   (e.g. a `Status` line per step, or a "Currently in progress" marker) so
   the plan reflects real state if the session is lost.
-- Work one step at a time. After finishing a step, stop and wait for the
-  user to review and explicitly say to continue before starting the next
-  step — never chain multiple steps together without that check-in.
 - The user handles all commits and PRs themselves — never run `git commit`
   or open a PR. Instead, after each deliverable, suggest a small commit
   message and a PR description for the user to use.

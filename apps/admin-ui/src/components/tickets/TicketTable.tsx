@@ -9,7 +9,7 @@ export function TicketTable({
   readOnly = false,
 }: {
   tickets: Ticket[];
-  /** When true, renders the ticket number as plain text instead of a link to the (admin-only) detail/edit page. */
+  /** When true, renders the ticket number as plain text instead of a link to the detail/edit page. */
   readOnly?: boolean;
 }) {
   const { t, i18n } = useTranslation();

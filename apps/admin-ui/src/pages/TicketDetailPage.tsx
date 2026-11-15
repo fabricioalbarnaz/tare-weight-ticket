@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { AuditLogList } from '../components/AuditLogList';
 import { EditLegForm } from '../components/forms/EditLegForm';
 import { ReprintButton } from '../components/forms/ReprintButton';
@@ -10,6 +11,7 @@ import { formatDateTime, formatWeight } from '../lib/datetime';
 
 export function TicketDetailPage() {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const ticketId = Number(id);
 
@@ -41,8 +43,11 @@ export function TicketDetailPage() {
 
   return (
     <div>
-      <Link to="/" className="text-sm text-slate-500 hover:underline">
-        {t('common.backToDashboard')}
+      <Link
+        to={user?.role === 'operator' ? '/operation' : '/'}
+        className="text-sm text-slate-500 hover:underline"
+      >
+        {user?.role === 'operator' ? t('common.backToOperation') : t('common.backToDashboard')}
       </Link>
 
       <div className="mt-2 mb-6 flex items-center justify-between">

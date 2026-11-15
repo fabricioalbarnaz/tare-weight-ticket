@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderApp } from '../test-utils';
-import { loginAsAdmin } from '../test-helpers';
+import { loginAsAdmin, loginAsOperator } from '../test-helpers';
 import { store } from '../api/mocks/fixtures';
 
 class FakeEventSource {
@@ -46,7 +46,7 @@ async function goToOperationPage() {
 }
 
 describe('OperationPage', () => {
-  it('lists tickets read-only, with no link to the detail/edit page', async () => {
+  it('lists tickets with a link to each one\'s detail/edit page, but no "new ticket" action', async () => {
     await goToOperationPage();
 
     await waitFor(() => {
@@ -54,8 +54,25 @@ describe('OperationPage', () => {
       expect(screen.getByText('XYZ9876')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('#1001')?.closest('a')).toBeNull();
+    expect(screen.getByRole('link', { name: '#1001' })).toHaveAttribute('href', '/tickets/1');
     expect(screen.queryByRole('button', { name: /new ticket/i })).not.toBeInTheDocument();
+  });
+
+  // 2026-11-14: operators can now reach a ticket's detail/edit page from here.
+  it('lets an operator open a ticket from the listing', async () => {
+    renderApp({ route: '/login' });
+    const user = await loginAsOperator();
+    await user.click(await screen.findByRole('link', { name: /operation/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('ABC1234')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('link', { name: '#1001' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /ticket #1001/i })).toBeInTheDocument();
+    });
   });
 
   // Full behavior (plate received → reading → result, closing/tare/alert
