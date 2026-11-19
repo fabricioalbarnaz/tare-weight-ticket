@@ -278,8 +278,11 @@ high per-character confidence despite being wrong, master plan §7 item
 truncated-read failure mode by design — no replacement guard was added.
 The plate-misread deduction match above is unaffected (it already
 tolerates non-7-character plates by simply never matching them). See
-master plan §11. Implemented and verified this session (not yet
-redeployed to the production install).
+master plan §11. **Same-day follow-up:** `MIN_CONFIDENCE_LEVEL` itself was
+then lowered from 80 to **70**, also at the user's explicit request — a
+further loosening of the same gate, independent of the length-check
+removal. Implemented and verified this session (not yet redeployed to
+the production install).
 
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather

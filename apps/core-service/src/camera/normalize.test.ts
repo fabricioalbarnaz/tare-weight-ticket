@@ -17,12 +17,12 @@ function makeEvent(overrides: Partial<AnprXmlEvent> = {}): AnprXmlEvent {
 
 describe('isReliablePlateRead', () => {
   it('accepts a 7-character plate at or above the confidence threshold', () => {
-    expect(isReliablePlateRead('ABC1234', 80)).toBe(true);
+    expect(isReliablePlateRead('ABC1234', 70)).toBe(true);
     expect(isReliablePlateRead('ABC1234', 96)).toBe(true);
   });
 
   it('rejects below the confidence threshold', () => {
-    expect(isReliablePlateRead('ABC1234', 79)).toBe(false);
+    expect(isReliablePlateRead('ABC1234', 69)).toBe(false);
   });
 
   // 2026-11-18: the length check was removed at the user's explicit

@@ -26,6 +26,7 @@ export interface NormalizedCameraEvent {
 /**
  * Minimum ANPR confidence for a read to be acted on. Starting value, not
  * confirmed against real field data yet — tune once there is some.
+ * Lowered from 80 to 70 at the user's explicit request (2026-11-18).
  *
  * **2026-11-18:** this used to also require the normalized plate be
  * exactly 7 characters (both Brazilian plate formats), rejecting anything
@@ -34,7 +35,7 @@ export interface NormalizedCameraEvent {
  * (a truncated read can carry high per-character confidence despite being
  * wrong) and the reversal.
  */
-const MIN_CONFIDENCE_LEVEL = 80;
+const MIN_CONFIDENCE_LEVEL = 70;
 
 export function isReliablePlateRead(_plate: string, confidenceLevel: number): boolean {
   return confidenceLevel >= MIN_CONFIDENCE_LEVEL;

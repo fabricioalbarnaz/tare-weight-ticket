@@ -8,8 +8,24 @@ in the same pass also surfaced and fixed a real, unrelated test bug: the
 plate-misread-deduction feature's `TicketDetailPage` test matched
 "RK76F83" ambiguously against both the banner and the audit log's raw
 JSON dump — fixed by scoping the assertion to the banner element itself.
-Not yet deployed to any production install. Pending user review before
-deleting this plan file per `CLAUDE.md`'s workflow.
+Not yet deployed to any production install. **Follow-up (same day, Step
+4 below):** `MIN_CONFIDENCE_LEVEL` lowered from 80 to 70 — code and tests
+updated, verified via Alpine Docker (`lint` 0 errors, `typecheck` clean,
+`build` clean; `core-service` test run in isolation 406/407, the one
+failure being the same pre-existing cold-start `/health` flake). Pending
+user review before deleting this plan file per `CLAUDE.md`'s workflow.
+
+## Follow-up, same day (Step 4)
+
+After this plan's steps landed, the user also asked to lower
+`MIN_CONFIDENCE_LEVEL` itself from 80 to **70** — a further loosening of
+the same reliability gate, independent of the length-check removal above.
+Done in the same files: `normalize.ts` (constant + doc comment) and
+`normalize.test.ts` (boundary tests updated from 80/79 to 70/69). No other
+behavior changed; see master plan §11 "Plate-reliability length check
+removed" follow-up note and `CLAUDE.md`.
+
+- [x] Step 4 — lower `MIN_CONFIDENCE_LEVEL` to 70 + update boundary tests
 
 ## Decision (requested by user, 2026-11-18)
 

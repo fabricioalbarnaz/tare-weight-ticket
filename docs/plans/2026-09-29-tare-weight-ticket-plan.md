@@ -200,8 +200,9 @@ the Admin UI for context.
     *inside* that window is still discarded outright instead (added
     2026-11-12), never reaching this rule.
   - Plate unreadable/empty from camera payload (`confidenceLevel` below
-    `MIN_CONFIDENCE_LEVEL`, **default 80 — the only factor since
-    2026-11-18**, see §11; a 7-character-length requirement was dropped)
+    `MIN_CONFIDENCE_LEVEL`, **default 70 (lowered from 80, 2026-11-18) —
+    the only factor since 2026-11-18**, see §11; a 7-character-length
+    requirement was dropped)
     → log to `raw_events` only, create nothing automatically, surface in
     Admin UI as an unresolved camera event needing manual ticket creation.
     **Decision (2026-11-03):** the driver signal is also withheld in this
@@ -1842,5 +1843,9 @@ merge per `CLAUDE.md`):
   returns `null` for different-length strings, so it simply never
   matches those, falling through to the ordinary `ANOMALY` path like any
   other non-match. No code change was needed there.
+- **Follow-up, same day**: `MIN_CONFIDENCE_LEVEL` itself was then lowered
+  from 80 to **70**, also at the user's explicit request — a further
+  loosening of the same reliability gate, independent of the length
+  check removed above. No other behavior changed.
 - See `docs/plans/2026-11-18-remove-plate-length-check-plan.md`; delete
   it once this entry is merged.
