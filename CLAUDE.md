@@ -166,6 +166,86 @@ same-plate re-reads never preempt. Prevents the "exit retry loop steals the
 next truck's weight" pattern in `docs/runbooks/known-ticket-failure-patterns.md`.
 See master plan §5/§11.
 
+**ANPR confidence storage (2026-11-10):** every camera `raw_events` row now
+also stores the Hikvision ANPR engine's `confidenceLevel` and
+`plateCharBelieve` alongside `readPlate`, for later triage of misreads.
+Deployed 2026-11-10, confirmed in production against a real reading
+2026-11-11. See master plan §7/§11.
+
+**Ticket list sort order (2026-11-12):** `listTickets` orders by
+`updatedAt desc` (secondary key `id desc`) instead of creation order, so a
+ticket that just had an exit, correction, or reprint surfaces near the top
+of the dashboard/operator screens instead of staying buried under newer
+tickets. Query-ordering change only, no schema/API change.
+
+**Same-plate duplicate camera read debounce (2026-11-12):** a second
+entrance (or second exit) read for the **same plate** within a configurable
+window (`CAMERA_DUPLICATE_PLATE_DEBOUNCE_MS`, default 2 minutes) is
+discarded — logged to `raw_events` as `discarded: 'duplicate_plate_read'`,
+never touching a ticket, the scale, or the driver signal. Scoped per plate
+*and* per direction, so it never interacts with the existing global
+post-release debounce or the different-plate preemption rule. Unreadable
+plates never debounce and are never debounced against. See master plan
+§5/§11.
+
+**Exit re-weigh correction (2026-11-12):** an exit read with no matching
+`OPEN` ticket for the plate, but a `CLOSED` ticket for that same plate whose
+exit was within a configurable window (`EXIT_REWEIGH_WINDOW_MS`, default
+2h), now reuses that ticket's entry weight/time to create a new, already-closed
+ticket with the fresh exit weight — a deliberate, narrowly-scoped exception
+to the "never guess on exit" rule, for the real-world case of a truck
+re-entering through another gate to correct its load. Both tickets
+cross-reference each other (`reweighOfTicketId`/`reweighedByTicketId`,
+migration `0003_petite_longshot.sql`) and are each audit-logged
+(`REWEIGH_CREATED`/`REWEIGHED`). See master plan §5/§11.
+
+**Redeploy (2026-11-12):** the three features above plus the ANPR
+confidence storage note's deploy were verified together via the Alpine
+container (`lint`/`typecheck`/`build` clean; `test` 379/380, the one
+failure being the already-documented pre-existing cold-start `/health`
+flake) and deployed to this production install. Live `tare.sqlite` backed
+up online (`better-sqlite3` `.backup()`) to
+`data/backup-before-rebuild-20261112/tare.online-backup.sqlite` and the
+prior image tagged `docker-core-service:rollback-20261112` before
+rebuilding. Post-deploy: container healthy, migration applied
+(`reweigh_of_ticket_id`/`reweighed_by_ticket_id` columns present), ticket
+count unchanged (640 / last id 645), no errors in startup logs.
+
+**Entrance stops overwriting an open ticket (2026-11-14):** reverses the
+original last-write-wins entrance rule — a second entrance reading for a
+plate that already has an `OPEN` ticket now always opens a brand-new
+`OPEN` ticket instead of overwriting it. An exit still closes an `OPEN`
+ticket for the plate, now picking the **most recently opened** one if more
+than one exists; an older `OPEN` ticket left behind stays open
+indefinitely, with no automatic flag or cleanup — resolved manually by an
+admin like any other stuck ticket, confirmed acceptable with the user. The
+`ENTRY_OVERWRITTEN` audit action, the `ticket_retriggered`
+`EntranceResult`/`WeighingOutcome` kind, and the `isRetrigger` audit-log
+field are all removed — there's no overwrite case left to log differently
+from a plain `entry_captured`. See master plan §5/§11.
+
+**Redeploy (2026-11-14):** the entrance no-overwrite change above (no
+schema change, business-logic only) was verified via the Alpine container
+(`lint`/`typecheck`/`build` clean; `test` 381/382, the one failure being
+the same already-documented pre-existing cold-start `/health` flake) and
+deployed to this production install. Live `tare.sqlite` backed up online
+(`better-sqlite3` `.backup()`) to
+`data/backup-before-rebuild-20261114/tare.online-backup.sqlite` and the
+prior image tagged `docker-core-service:rollback-20261114` before
+rebuilding. Post-deploy: container healthy, ticket count unchanged
+(667 / last id 672), no errors in startup logs.
+
+**Redeploy (2026-11-15):** deployed the two admin-ui operator commits
+(letting an operator view/edit/reprint a ticket, and create one manually —
+no schema change, business-logic/UI only) to this production install.
+Verified via the Alpine container (`lint`/`typecheck`/`test`/`build` all
+clean, 383/383 tests, no flake this run). Live `tare.sqlite` backed up
+online (`better-sqlite3` `.backup()`) to
+`data/backup-before-rebuild-20261115/tare.online-backup.sqlite` and the
+prior image tagged `docker-core-service:rollback-20261115` before
+rebuilding. Post-deploy: container healthy, ticket count unchanged
+(701 / last id 706), admin UI served correctly, no errors in startup logs.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.
@@ -215,10 +295,14 @@ repo, the `@tare/*` packages, file paths, or Docker images to match.
 - **Core business rule**: net weight is always
   `abs(entry_weight - exit_weight)`, valid whether the truck arrives empty
   and leaves loaded or the reverse. A misread/unreadable plate is never
-  auto-corrected — it requires an admin. A repeated entrance read for an
-  already-open ticket overwrites that ticket's entry data (last-write-wins,
-  intentional). An exit read with no matching open ticket is flagged as an
-  anomaly, never guessed at or auto-closed.
+  auto-corrected — it requires an admin. A repeated entrance read for a
+  plate that already has an `OPEN` ticket always opens a brand-new `OPEN`
+  ticket instead of overwriting the existing one (reversed 2026-11-14 from
+  the original last-write-wins rule — see below); an exit then matches the
+  **most recently opened** `OPEN` ticket for that plate, and any older
+  `OPEN` ticket left behind stays open indefinitely with no automatic flag.
+  An exit read with no matching open ticket is flagged as an anomaly, never
+  guessed at or auto-closed.
 
 ## Working in this repo
 

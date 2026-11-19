@@ -261,3 +261,164 @@ and items 2–3 below are still open.
    FIFO-queue order) remains the same out-of-scope item noted in the
    2026-10-31 plan's "Scope" section — this second occurrence is more
    evidence for revisiting that decision if this keeps recurring.
+
+## Pattern: exit reading arrives a fraction of a second after entrance,
+## same weight, closes the ticket with net weight zero
+
+**Symptom:** a `CLOSED`, auto-printed ticket has `net_weight_kg = 0` and
+`entry_weight_kg === exit_weight_kg` exactly, with `exit_at` only a
+fraction of a second (well under a second) after `entry_at`. Shortly
+afterward (minutes, not seconds), a *second*, correct ticket for the same
+plate appears, created by the exit-re-weigh-correction rule
+(`reweighOfTicketId`/`reweighedByTicketId`, see master plan §5/§11), with
+a real net weight that matches the truck's usual pattern.
+
+**Root cause:** the entrance and exit camera webhooks are configured to
+the same physical `cameraId` on this install. When that camera fires an
+entrance read and then, within under a second, also fires an exit read
+for the same plate — the truck is almost certainly still sitting on the
+scale, not actually leaving — the system has no rule that rejects this.
+Two independent debounce mechanisms exist in `camera/routes.ts`
+(`CAMERA_POST_RELEASE_DEBOUNCE_MS`, which only fires *after* a ticket
+closes, and `CAMERA_DUPLICATE_PLATE_DEBOUNCE_MS`, which only debounces a
+repeated read in the *same* direction), but neither covers an exit
+arriving shortly after an entrance — that case is explicitly tested as
+**not** debounced, by design (`camera/routes.test.ts`, "does not debounce
+across directions (entrance vs. exit for the same plate)"). There is also
+no minimum-dwell-time rule between entrance and exit. Because the scale
+gives the same stable weight both times (`attemptsUsed: 1` on both legs —
+not a stability timeout, not a queue-attribution race like the pattern
+above), the reading itself looks perfectly valid to the session service,
+which closes the ticket normally with `net = |entry − exit| = 0`.
+
+**Why it self-corrected this time:** the truck's *real* exit, ~33 minutes
+later, found no `OPEN` ticket for the plate (the spurious exit had already
+closed it) but did find the just-closed ticket within the exit-re-weigh
+window (`EXIT_REWEIGH_WINDOW_MS`, default 2h — see master plan §5/§11),
+so it reused the original entry weight/time and produced a second,
+correct, closed ticket. This is a deliberate narrow exception, not a
+general safety net — it only works because the real exit happened to fall
+inside that window and no other event used up the re-weigh match first.
+
+**How to confirm during investigation:**
+1. Query `tickets` for the plate; look for a `CLOSED` ticket with
+   `net_weight_kg = 0` and `entry_weight_kg === exit_weight_kg`.
+2. Query `ticket_audit_log` for that ticket — both `entry_captured` and
+   `exit_captured` should show `attemptsUsed: 1` (rules out a stability
+   timeout or a stolen-reading race).
+3. Query `raw_events` for the plate around that time — the entrance and
+   exit rows should share the same `cameraId` and have `received_at`
+   well under a second apart.
+4. Check whether a later `reweigh_ticket_created` audit entry
+   (`originalTicketId` = the zero-net ticket) exists — if so, the data was
+   recovered automatically and no admin action is needed beyond awareness.
+   If it doesn't exist (the real exit fell outside the 2h window, or
+   another event consumed the re-weigh match), the truck's real exit
+   weight is simply missing and needs manual admin correction.
+
+**Example:** plate IUN4C51, 2026-11-18 (times GMT-3). Entrance at
+07:32:44.281 (cam 88, 70,540 kg); exit at 07:32:44.800 (same cam 88,
+519 ms later, same 70,540 kg) auto-closed and auto-printed ticket #791
+(id 796) with `net_weight_kg = 0`. The truck's real exit at 08:05:26.243
+(21,420 kg) found no `OPEN` ticket, matched #791 inside the 2h re-weigh
+window instead, and produced ticket #795 (id 800,
+`reweighOfTicketId: 796`) with the correct `net_weight_kg = 49,120`.
+
+**Not yet fixed / suggested fix:** add a configurable minimum-dwell-time
+check between an entrance and an exit reading for the same plate (e.g.
+`CAMERA_MIN_DWELL_MS`) — a cross-direction case the existing duplicate-
+plate debounce intentionally does not cover (see above). An exit arriving
+inside that window, especially with a weight matching the entrance, should
+likely be discarded (flagged in `raw_events`, no ticket close) rather than
+accepted, mirroring how the 2026-11-10 preemption/debounce features treat
+other suspicious camera timing. Not started — needs its own
+`docs/plans/` entry and sign-off per this project's workflow before
+implementation.
+
+## Pattern: single-character plate misread produces an `ANOMALY` instead
+## of matching the real `OPEN`/`CLOSED` ticket, and `plateCharBelieve`
+## reliably points at the wrong character
+
+**Symptom:** an exit (or less often entrance) reading becomes an
+`ANOMALY` ticket (no matching `OPEN` ticket) or a one-off ticket that
+never reconciles, even though a ticket for the same plate *minus one
+character* exists `OPEN` or was `CLOSED` shortly before/after, with a
+plausible net weight once the two are mentally merged. Since the
+2026-11-10 ANPR-confidence-storage feature, the misread reading's
+`plateCharBelieve` array (per-character confidence, `camera/routes.ts`
+raw_payload) shows one character noticeably below the ~99% the other six
+sit at.
+
+**Investigation method:** for every `ANOMALY` ticket, compute Levenshtein
+distance between its `plate` and every other ticket's `plate` with an
+`entry_at`/`exit_at` within ~24h; a distance of 1 is a likely misread
+match. Then check that candidate's `raw_events` entry for
+`confidenceLevel`/`plateCharBelieve` and confirm the lowest value lands on
+the differing character's index.
+
+**Validated against this install's data (2026-11-18 analysis):** of 141
+`ANOMALY` tickets created since the confidence feature's rollout window,
+18 had a distance-1 candidate ticket nearby. Of those, 5 had
+`plateCharBelieve` data, and in **all 5**, the lowest-confidence character
+was exactly the one that differed from the matching ticket's plate:
+
+| Misread plate (anomaly) | Likely real plate | Wrong position | Confidence there | Other 6 positions |
+|---|---|---|---|---|
+| JAP4G45 | JAD4G45 | 3rd (P/D) | 69% | 93–99% |
+| JAL8I68 | JAL8368 | 5th (I/3) | 51% | 99% |
+| IUC8H27 | IUO8H27 | 3rd (C/O) | 95% | 98–99% |
+| ITX3F22 | ITX3F02 | 6th (2/0) | 68% | 99% |
+| RK76F83 | RKZ6F83 | 3rd (7/Z) | 67% | 99% |
+
+The other 13 distance-1 matches predate the confidence feature (no
+`plateCharBelieve` to confirm against), but show the same shape from the
+plate strings alone: RYS3D55/CYS3D55, JAE4090/JAE4D90, JBU4D37 and
+JB04D37/JBJ4D37, EIA8E98/IIA8E98, WSM2287/ISM2287, IHS4I31/IHS4131,
+ILN4C51/IUN4C51, TRI0D13/TRI6D13, MJB0F64/MJB0E64, IXG5015/IXG5815,
+IGG8319/GGG8319.
+
+**Two of these are chronic (same physical plate, same character position,
+repeatedly) rather than one-off, and both currently leave a ticket stuck
+`OPEN` in production:**
+
+1. **RKZ6F83 ↔ RK76F83** (3rd character, Z/7 confusion) — recurs across
+   2026-11-11, 11-12 (×2), 11-13, 11-17, 11-18. Ticket **#744** (id 749,
+   plate RKZ6F83, entry 68,120 kg) has been `OPEN` since 2026-11-17
+   07:33. Its real exit is almost certainly `ANOMALY` ticket **#812**
+   (id 817, plate RK76F83, exit 2026-11-18 17:16, 22,640 kg) —
+   `68,120 − 22,640 = 45,480 kg`, squarely inside this plate's historical
+   net-weight range (45,360–47,300 kg across its prior 12 closed trips).
+   **Needs an admin correction now** (correct the entry-side ticket's
+   plate or close it against this exit via the Admin UI).
+2. **IUO8H27 / IUC8H27 / IU08H27** (3rd character, O/C/0 optical
+   ambiguity) — ticket **#598** (id 603, plate IUO8H27, entry 59,800 kg)
+   has been `OPEN` since **2026-11-11** — 7 days as of this writing. Its
+   real exit is almost certainly `ANOMALY` ticket **#602** (id 607, plate
+   IUC8H27, exit same evening, 20,680 kg) —
+   `59,800 − 20,680 = 39,120 kg`, consistent with a later confirmed trip
+   of the same plate (spelled "IU08H27" that time) netting 37,800 kg on
+   2026-11-16. **Older and more urgent of the two** — needs an admin
+   correction now.
+
+**General confidence statistics (726 camera readings with confidence data
+since the 2026-11-10 deploy):**
+- 36% (263) are totally unreadable (`confidenceLevel: 0`,
+  `readPlate: "UNKNOWN"`) — correctly never touch a ticket.
+- 64% (463) produced a plate guess; average confidence 96.9%, with 92%
+  (428) at 95–98%.
+- Only 7.6% (35) fell below 95% — this is where every misread above came
+  from.
+- Per-character-position average confidence is flat across all 7
+  positions (97.1–98.5%) — there is **no systematic weak position** across
+  the fleet; weakness is plate-specific (a given plate's particular
+  glyph), not a camera/angle bias toward one slot.
+
+**Suggested fix, not yet implemented:** when an exit finds no matching
+`OPEN` ticket, before filing an `ANOMALY`, check `OPEN` tickets for a
+distance-1 plate match and, if the differing character's
+`plateCharBelieve` is anomalously low relative to the rest of that
+reading, surface it as a suggested correction in the Admin UI instead of
+a bare anomaly (the per-character signal validated 100% reliable above
+makes this tractable). Needs its own `docs/plans/` entry and sign-off
+before implementation, and in the meantime, tickets #744 (id 749) and
+#598 (id 603) above need manual correction.
