@@ -81,10 +81,11 @@ describe('TicketDetailPage', () => {
     await loginAsAdmin();
 
     await screen.findByRole('heading', { name: /ticket #1009/i });
-    await waitFor(() => {
-      expect(screen.getByText(/closed automatically by plate-misread deduction/i)).toBeInTheDocument();
-      expect(screen.getByText(/RK76F83/)).toBeInTheDocument();
-    });
+    // Matched against the banner's own text, not getByText("RK76F83") on the
+    // whole page — the audit log below also dumps the raw payload JSON
+    // containing "RK76F83", which would otherwise make that query ambiguous.
+    const banner = await screen.findByText(/closed automatically by plate-misread deduction/i);
+    expect(banner.textContent).toContain('RK76F83');
   });
 
   it('reprints a closed ticket after confirmation', async () => {

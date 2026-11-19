@@ -286,12 +286,15 @@ describe('POST /webhooks/camera/entrance', () => {
     expect(driverSignalCalls).toEqual([]);
   });
 
-  it('creates no ticket and withholds the driver signal when the plate is shorter than expected (likely truncated read)', async () => {
+  // 2026-11-18: previously withheld (likely-truncated-read guard, now
+  // removed at the user's explicit request — see master plan §7/§11).
+  it('opens a ticket normally for a shorter-than-usual plate at high confidence', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
     const response = await postEntrance({ plate: 'V0694', confidence: 99 });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ kind: 'plate_unreadable' });
-    expect(driverSignalCalls).toEqual([]);
+    expect(response.json().kind).toBe('ticket_opened');
+    expect(driverSignalCalls).toEqual(['in']);
   });
 
   it('does not signal the driver when the ticket write fails', async () => {

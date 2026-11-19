@@ -199,9 +199,11 @@ the Admin UI for context.
     once the duplicate-plate debounce window below has passed — a reading
     *inside* that window is still discarded outright instead (added
     2026-11-12), never reaching this rule.
-  - Plate unreadable/empty from camera payload → log to `raw_events` only,
-    create nothing automatically, surface in Admin UI as an unresolved
-    camera event needing manual ticket creation.
+  - Plate unreadable/empty from camera payload (`confidenceLevel` below
+    `MIN_CONFIDENCE_LEVEL`, **default 80 — the only factor since
+    2026-11-18**, see §11; a 7-character-length requirement was dropped)
+    → log to `raw_events` only, create nothing automatically, surface in
+    Admin UI as an unresolved camera event needing manual ticket creation.
     **Decision (2026-11-03):** the driver signal is also withheld in this
     case, even when the scale read itself succeeds — see the matching note
     under "Exit camera fires" below and §11 for the full rationale (an
@@ -858,7 +860,9 @@ merge per `CLAUDE.md`):
   are 7 chars); anything failing either check reaches the existing
   `plate_unreadable` path with an empty `rawPlate`, rather than being
   guessed at. Both thresholds are starting points, flagged for tuning once
-  there's real field data.
+  there's real field data. **Reversed 2026-11-18** (see §11): the length
+  half of this check was removed at the user's request — confidence is now
+  the only factor.
 - **The `payload-schema.ts`/`normalize.ts` isolation boundary deliberately
   built in Phases 2–3 held exactly as intended** — `session-service.ts`
   needed zero changes; only the camera-specific files and the webhook
@@ -1815,3 +1819,28 @@ merge per `CLAUDE.md`):
   of this feature; no retroactive reconciliation job was built.
 - See `docs/plans/2026-11-18-plate-misread-deduction-plan.md`; delete it
   once this entry is merged.
+
+### Plate-reliability length check removed (2026-11-18)
+
+- **Decision (requested by the user)**: `isReliablePlateRead`
+  (`camera/normalize.ts`) no longer rejects a plate read for having the
+  "wrong" character count — it used to require **both**
+  `confidenceLevel >= MIN_CONFIDENCE_LEVEL` (80) **and** the normalized
+  plate being exactly 7 characters (§7 item 3's original finding: a
+  truncated read can carry high per-character confidence despite being
+  wrong). Confidence alone now decides reliability; a read like `V0694`
+  (5 characters) or an 8-character non-standard plate is acted on
+  normally as long as its overall confidence clears the threshold.
+- **Risk accepted, not compensated for**: this reopens exactly the
+  truncated-read failure mode §7 item 3 originally described — a garbled
+  or cut-off read that happens to score ≥80% confidence will now open or
+  close a ticket instead of being withheld as unreadable. No replacement
+  guard (e.g. a length-aware confidence curve) was requested or added.
+- **Unaffected**: the plate-misread deduction match (`tickets/
+  plate-deduction.ts`, "Plate-misread deduction close" above) was already
+  tolerant of non-7-character plates — `findSingleCharDifferenceIndex`
+  returns `null` for different-length strings, so it simply never
+  matches those, falling through to the ordinary `ANOMALY` path like any
+  other non-match. No code change was needed there.
+- See `docs/plans/2026-11-18-remove-plate-length-check-plan.md`; delete
+  it once this entry is merged.

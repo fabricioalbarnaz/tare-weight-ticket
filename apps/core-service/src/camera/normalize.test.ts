@@ -25,12 +25,14 @@ describe('isReliablePlateRead', () => {
     expect(isReliablePlateRead('ABC1234', 79)).toBe(false);
   });
 
-  it('rejects a plate shorter than 7 characters even at high confidence', () => {
-    expect(isReliablePlateRead('V0694', 99)).toBe(false);
+  // 2026-11-18: the length check was removed at the user's explicit
+  // request — see master plan §7/§11. Confidence is now the only factor.
+  it('accepts a plate shorter than 7 characters at or above the confidence threshold', () => {
+    expect(isReliablePlateRead('V0694', 99)).toBe(true);
   });
 
-  it('rejects a plate longer than 7 characters', () => {
-    expect(isReliablePlateRead('ABC12345', 99)).toBe(false);
+  it('accepts a plate longer than 7 characters at or above the confidence threshold', () => {
+    expect(isReliablePlateRead('ABC12345', 99)).toBe(true);
   });
 });
 
@@ -65,13 +67,15 @@ describe('normalizeCameraPayload', () => {
     });
   });
 
-  it('blanks rawPlate when the plate is shorter than expected (likely truncated read)', () => {
+  // 2026-11-18: previously blanked (likely-truncated-read guard, now
+  // removed at the user's explicit request — see master plan §7/§11).
+  it('keeps rawPlate for a shorter-than-usual plate at high confidence', () => {
     const result = normalizeCameraPayload(makeEvent({ licensePlate: 'V0694', confidenceLevel: 99 }));
 
-    expect(result.rawPlate).toBe('');
+    expect(result.rawPlate).toBe('V0694');
   });
 
-  it('normalizes plate casing/punctuation before the length check', () => {
+  it('normalizes plate casing/punctuation', () => {
     const result = normalizeCameraPayload(makeEvent({ licensePlate: 'abc-1234' }));
 
     expect(result.rawPlate).toBe('ABC1234');

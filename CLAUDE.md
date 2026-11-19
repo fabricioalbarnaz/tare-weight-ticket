@@ -268,6 +268,19 @@ session (not yet redeployed to the production install — see master plan
 §11 for the full write-up); needs the user's own redeploy procedure
 (online backup + image rollback tag) before it's live.
 
+**Plate-reliability length check removed (2026-11-18):** at the user's
+explicit request, `isReliablePlateRead` (`camera/normalize.ts`) no longer
+rejects a plate read for having the "wrong" character count — it used to
+require both `confidenceLevel >= 80` *and* the normalized plate being
+exactly 7 characters (the original guard against a truncated read scoring
+high per-character confidence despite being wrong, master plan §7 item
+3). Confidence alone now decides reliability. This reopens that
+truncated-read failure mode by design — no replacement guard was added.
+The plate-misread deduction match above is unaffected (it already
+tolerates non-7-character plates by simply never matching them). See
+master plan §11. Implemented and verified this session (not yet
+redeployed to the production install).
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

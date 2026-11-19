@@ -24,21 +24,20 @@ export interface NormalizedCameraEvent {
 }
 
 /**
- * Minimum ANPR confidence, and the exact character count expected from a
- * genuine read (both Brazilian plate formats — legacy `AAA9999` and
- * Mercosul `AAA9A99` — are 7 characters). Below either, the read is
- * treated as unreadable rather than acted on: per the truck-load-queue
- * findings (docs/plans master plan §7 item 3), a short plate can still
- * carry a high per-character confidence despite being a truncated read, so
- * character count needs its own check independent of `confidenceLevel`.
- * Starting values, not confirmed against real field data yet — tune once
- * there is some.
+ * Minimum ANPR confidence for a read to be acted on. Starting value, not
+ * confirmed against real field data yet — tune once there is some.
+ *
+ * **2026-11-18:** this used to also require the normalized plate be
+ * exactly 7 characters (both Brazilian plate formats), rejecting anything
+ * else as unreadable regardless of confidence — removed at the user's
+ * explicit request. See master plan §7/§11 for the original rationale
+ * (a truncated read can carry high per-character confidence despite being
+ * wrong) and the reversal.
  */
 const MIN_CONFIDENCE_LEVEL = 80;
-const EXPECTED_PLATE_LENGTH = 7;
 
-export function isReliablePlateRead(plate: string, confidenceLevel: number): boolean {
-  return confidenceLevel >= MIN_CONFIDENCE_LEVEL && plate.length === EXPECTED_PLATE_LENGTH;
+export function isReliablePlateRead(_plate: string, confidenceLevel: number): boolean {
+  return confidenceLevel >= MIN_CONFIDENCE_LEVEL;
 }
 
 /**
