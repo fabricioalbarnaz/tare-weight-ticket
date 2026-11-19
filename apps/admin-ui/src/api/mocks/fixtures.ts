@@ -214,7 +214,37 @@ function buildInitialStore(): FixtureStore {
   });
   reweighOriginal.reweighedByTicketId = reweigh.id;
 
-  const tickets = [open, closed, anomaly, needsAttention, historical, suspect, reweighOriginal, reweigh];
+  // Plate-misread deduction close (master plan §5/§11,
+  // docs/plans/2026-11-18-plate-misread-deduction-plan.md) — mirrors the
+  // real runbook example (ticket #744, RKZ6F83): the exit camera misread
+  // one character ('Z' -> '7'), but the per-character confidence confirmed
+  // it, so the system closed this OPEN ticket by deduction instead of
+  // filing an ANOMALY for 'RK76F83'.
+  const deductionClosed = makeTicket({
+    plate: 'RKZ6F83',
+    status: 'CLOSED',
+    entryAt: hoursAgo(3),
+    entryWeightKg: 68120,
+    entryCameraId: 'cam-entrance-1',
+    exitAt: hoursAgo(2.5),
+    exitWeightKg: 22640,
+    exitCameraId: 'cam-exit-1',
+    netWeightKg: 45480,
+    printedAt: hoursAgo(2.5),
+    closedByDeduction: true,
+  });
+
+  const tickets = [
+    open,
+    closed,
+    anomaly,
+    needsAttention,
+    historical,
+    suspect,
+    reweighOriginal,
+    reweigh,
+    deductionClosed,
+  ];
 
   const auditLog: AuditLogEntry[] = [
     makeAuditEntry(open.id, 'system', 'entry_captured', {
@@ -272,6 +302,18 @@ function buildInitialStore(): FixtureStore {
       originalTicketId: reweighOriginal.id,
       weightKg: reweigh.exitWeightKg,
       cameraId: reweigh.exitCameraId,
+    }),
+    makeAuditEntry(deductionClosed.id, 'system', 'entry_captured', {
+      weightKg: deductionClosed.entryWeightKg,
+      cameraId: deductionClosed.entryCameraId,
+    }),
+    makeAuditEntry(deductionClosed.id, 'system', 'closed_by_plate_deduction', {
+      misreadPlate: 'RK76F83',
+      diffIndex: 2,
+      diffCharConfidence: 67,
+      otherCharsMinConfidence: 99,
+      weightKg: deductionClosed.exitWeightKg,
+      cameraId: deductionClosed.exitCameraId,
     }),
   ];
 

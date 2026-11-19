@@ -24,6 +24,7 @@ export type WeighingOutcome =
   | 'ticket_closed'
   | 'ticket_closed_via_tare'
   | 'ticket_reweighed'
+  | 'ticket_closed_by_deduction'
   | 'exit_capture_pending'
   | 'anomaly_flagged'
   | 'plate_unreadable';

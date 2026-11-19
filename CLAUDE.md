@@ -246,6 +246,28 @@ prior image tagged `docker-core-service:rollback-20261115` before
 rebuilding. Post-deploy: container healthy, ticket count unchanged
 (701 / last id 706), admin UI served correctly, no errors in startup logs.
 
+**Plate-misread deduction close (2026-11-18):** implements the "suggested
+fix" from `docs/runbooks/known-ticket-failure-patterns.md`'s single-
+character-misread pattern, but fully automatic rather than merely
+surfaced to an admin — a deliberate, user-requested, narrow exception to
+"a misread/unreadable plate is never auto-corrected" (master plan §5). An
+exit reading with no exact-plate `OPEN` ticket and no re-weigh candidate
+now also checks `OPEN` tickets opened within `PLATE_DEDUCTION_WINDOW_MS`
+(default 24h) for a same-length, single-character-different plate whose
+ANPR `plateCharBelieve` confirms the misread (differing character below
+95% confidence **and** at least 15 points below every other character —
+the exact shape of every confidence-backed case validated in the
+runbook). A match closes that ticket automatically with the exit's
+weight (printed/signaled like a normal close, audited as
+`closed_by_plate_deduction`); an ambiguous match (more than one
+qualifying candidate) still falls through to the ordinary `ANOMALY` path,
+unchanged. The two already-stuck tickets that motivated this (#744, #598)
+are outside this feature's scope (both past any reasonable 24h window)
+and still need manual Admin UI correction. Implemented and verified this
+session (not yet redeployed to the production install — see master plan
+§11 for the full write-up); needs the user's own redeploy procedure
+(online backup + image rollback tag) before it's live.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

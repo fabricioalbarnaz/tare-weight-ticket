@@ -545,6 +545,37 @@ describe('TicketRepository', () => {
       expect(byId.get(normal.id)).toBe(false);
       expect(byId.get(noAttemptsField.id)).toBe(false);
     });
+
+    it('flags closedByDeduction when an audit log entry recorded closed_by_plate_deduction', () => {
+      const deduced = repo.create({
+        plate: 'DEDU0001',
+        entryAt: new Date(),
+        entryWeightKg: 68120,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(deduced.id, 'system', 'closed_by_plate_deduction', {
+        misreadPlate: 'DEDU9001',
+        diffIndex: 3,
+        diffCharConfidence: 60,
+        otherCharsMinConfidence: 99,
+      });
+
+      const normal = repo.create({
+        plate: 'DEDU0002',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(normal.id, 'system', 'exit_captured', { weightKg: 500, cameraId: 'cam-2' });
+
+      const result = repo.listTickets({});
+
+      const byId = new Map(result.items.map((t) => [t.id, t.closedByDeduction]));
+      expect(byId.get(deduced.id)).toBe(true);
+      expect(byId.get(normal.id)).toBe(false);
+    });
   });
 
   describe('listUnresolvedEvents', () => {
@@ -804,6 +835,77 @@ describe('TicketRepository', () => {
       });
 
       expect(repo.findMostRecentClosedTicketByPlate('RWG0003')).toEqual(secondClosed);
+    });
+  });
+
+  describe('findOpenTicketsEnteredAfter', () => {
+    it('returns an OPEN ticket whose entryAt is at or after the cutoff', () => {
+      const ticket = repo.create({
+        plate: 'PDC0001',
+        entryAt: new Date('2026-11-18T08:00:00Z'),
+        entryWeightKg: 60000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findOpenTicketsEnteredAfter(new Date('2026-11-17T08:00:00Z'))).toEqual([ticket]);
+      expect(repo.findOpenTicketsEnteredAfter(new Date('2026-11-18T08:00:00Z'))).toEqual([ticket]);
+    });
+
+    it('excludes an OPEN ticket entered before the cutoff', () => {
+      repo.create({
+        plate: 'PDC0002',
+        entryAt: new Date('2026-11-17T08:00:00Z'),
+        entryWeightKg: 60000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findOpenTicketsEnteredAfter(new Date('2026-11-18T08:00:00Z'))).toEqual([]);
+    });
+
+    it('excludes CLOSED and ANOMALY tickets', () => {
+      const closed = repo.create({
+        plate: 'PDC0003',
+        entryAt: new Date('2026-11-18T08:00:00Z'),
+        entryWeightKg: 60000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.close(closed.id, {
+        exitAt: new Date('2026-11-18T09:00:00Z'),
+        exitWeightKg: 20000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+      repo.flagAnomaly({
+        plate: 'PDC0004',
+        exitAt: new Date('2026-11-18T09:00:00Z'),
+        exitWeightKg: 5000,
+        exitCameraId: 'cam-2',
+        exitCaptureFailed: false,
+      });
+
+      expect(repo.findOpenTicketsEnteredAfter(new Date('2026-11-17T00:00:00Z'))).toEqual([]);
+    });
+
+    it('orders results newest-entry first', () => {
+      const older = repo.create({
+        plate: 'PDC0005',
+        entryAt: new Date('2026-11-18T08:00:00Z'),
+        entryWeightKg: 60000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      const newer = repo.create({
+        plate: 'PDC0006',
+        entryAt: new Date('2026-11-18T10:00:00Z'),
+        entryWeightKg: 61000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+
+      expect(repo.findOpenTicketsEnteredAfter(new Date('2026-11-17T00:00:00Z'))).toEqual([newer, older]);
     });
   });
 

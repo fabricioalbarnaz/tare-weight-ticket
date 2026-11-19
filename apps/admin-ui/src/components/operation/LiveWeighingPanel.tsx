@@ -17,6 +17,7 @@ const CLOSING_OUTCOMES = new Set<WeighingResultEvent['outcome']>([
   'ticket_closed',
   'ticket_closed_via_tare',
   'ticket_reweighed',
+  'ticket_closed_by_deduction',
 ]);
 
 type PanelState =
@@ -142,6 +143,9 @@ export function LiveWeighingPanel() {
         <div className="mt-3 border-t border-slate-200 pt-3">
           <TicketTable tickets={[state.event.ticket]} />
           {alert && <p className="mt-2 text-xs font-medium text-red-800">{t('operation.panel.alerts.closedNeedsAttention')}</p>}
+          {state.event.outcome === 'ticket_closed_by_deduction' && (
+            <p className="mt-2 text-xs font-medium text-amber-700">{t('operation.panel.info.closedByDeduction')}</p>
+          )}
         </div>
       )}
     </div>

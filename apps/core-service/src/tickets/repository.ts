@@ -23,6 +23,8 @@ export type RawEvent = typeof rawEvents.$inferSelect;
  */
 export interface TicketListItem extends Ticket {
   suspectWeight: boolean;
+  /** True when this ticket was closed by the plate-misread deduction match instead of a normal exit — see docs/plans/2026-11-18-plate-misread-deduction-plan.md. */
+  closedByDeduction: boolean;
 }
 
 export interface Paginated<T> {
@@ -128,6 +130,16 @@ export interface TicketRepository {
    * ticket over the one it superseded, so chained re-weighs just work.
    */
   findMostRecentClosedTicketByPlate(plate: string): Ticket | undefined;
+  /**
+   * `OPEN` tickets whose `entryAt` is at or after `cutoff`, newest first —
+   * anchors the plate-misread deduction close (master plan §5/§11,
+   * docs/plans/2026-11-18-plate-misread-deduction-plan.md): an exit read
+   * with no exact-plate `OPEN` ticket can still close a same-length,
+   * single-character-different `OPEN` ticket within this age window
+   * instead of being flagged `ANOMALY`. Expected to return at most a
+   * handful of rows at a time, given this system's volume.
+   */
+  findOpenTicketsEnteredAfter(cutoff: Date): Ticket[];
   create(input: CreateTicketInput): Ticket;
   updateEntry(ticketId: number, input: UpdateEntryInput): Ticket;
   close(ticketId: number, input: CloseTicketInput): Ticket;
@@ -194,6 +206,21 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
     return suspectIds;
   }
 
+  /**
+   * Ticket ids among `ticketIds` with a `closed_by_plate_deduction` audit
+   * log entry — see docs/plans/2026-11-18-plate-misread-deduction-plan.md.
+   * Unlike `findSuspectTicketIds`, this only needs the action name, not the
+   * payload.
+   */
+  function findDeductionClosedTicketIds(ticketIds: number[]): Set<number> {
+    const entries = db
+      .select({ ticketId: ticketAuditLog.ticketId })
+      .from(ticketAuditLog)
+      .where(and(inArray(ticketAuditLog.ticketId, ticketIds), eq(ticketAuditLog.action, 'closed_by_plate_deduction')))
+      .all();
+    return new Set(entries.map((entry) => entry.ticketId));
+  }
+
   return {
     findOpenByPlate(plate) {
       return db
@@ -241,13 +268,16 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         total: 0,
       };
 
-      const suspectTicketIds = items.length > 0 ? findSuspectTicketIds(items.map((t) => t.id)) : new Set<number>();
-      const itemsWithSuspectFlag = items.map((item) => ({
+      const ticketIds = items.map((t) => t.id);
+      const suspectTicketIds = items.length > 0 ? findSuspectTicketIds(ticketIds) : new Set<number>();
+      const deductionClosedTicketIds = items.length > 0 ? findDeductionClosedTicketIds(ticketIds) : new Set<number>();
+      const itemsWithFlags = items.map((item) => ({
         ...item,
         suspectWeight: suspectTicketIds.has(item.id),
+        closedByDeduction: deductionClosedTicketIds.has(item.id),
       }));
 
-      return { items: itemsWithSuspectFlag, total, page, pageSize };
+      return { items: itemsWithFlags, total, page, pageSize };
     },
 
     listUnresolvedEvents(query) {
@@ -326,6 +356,15 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .orderBy(desc(tickets.exitAt))
         .limit(1)
         .get();
+    },
+
+    findOpenTicketsEnteredAfter(cutoff) {
+      return db
+        .select()
+        .from(tickets)
+        .where(and(eq(tickets.status, 'OPEN'), isNotNull(tickets.entryAt), gte(tickets.entryAt, cutoff)))
+        .orderBy(desc(tickets.entryAt), desc(tickets.id))
+        .all();
     },
 
     findLastEventTimestamp(source) {

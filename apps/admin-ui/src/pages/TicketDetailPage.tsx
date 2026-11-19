@@ -41,6 +41,13 @@ export function TicketDetailPage() {
 
   const { ticket, auditLog } = data;
 
+  // Plate-misread deduction close (master plan §5/§11,
+  // docs/plans/2026-11-18-plate-misread-deduction-plan.md): derived from
+  // the audit log rather than a ticket field, since the full log is
+  // already fetched for this page.
+  const deductionEntry = auditLog.find((entry) => entry.action === 'closed_by_plate_deduction');
+  const misreadPlate = (deductionEntry?.payload as { misreadPlate?: string } | null)?.misreadPlate ?? '';
+
   return (
     <div>
       <Link
@@ -79,6 +86,11 @@ export function TicketDetailPage() {
               <Link to={`/tickets/${ticket.reweighedByTicketId}`} className="underline">
                 {t('common.view')}
               </Link>
+            </p>
+          )}
+          {deductionEntry && (
+            <p className="mt-1 text-sm text-amber-700">
+              {t('ticketDetail.closedByDeduction', { misreadPlate })}
             </p>
           )}
         </div>

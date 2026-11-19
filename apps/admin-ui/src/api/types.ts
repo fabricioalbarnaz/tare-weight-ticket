@@ -49,6 +49,14 @@ export interface Ticket {
    * docs/plans/2026-10-31-scale-weight-attribution-fix-plan.md).
    */
   suspectWeight?: boolean;
+
+  /**
+   * True when this ticket was closed by the plate-misread deduction match
+   * instead of a normal exit — see
+   * docs/plans/2026-11-18-plate-misread-deduction-plan.md. Only present on
+   * tickets returned by `listTickets`, same as `suspectWeight`.
+   */
+  closedByDeduction?: boolean;
 }
 
 export interface AuditLogEntry {

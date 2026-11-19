@@ -24,7 +24,10 @@ beforeEach(() => {
   sqlite = created.sqlite;
   repo = createTicketRepository(db);
   truckRepo = createTruckRepository(db);
-  service = createSessionService(repo, truckRepo, { reweighWindowMs: 2 * 60 * 60 * 1000 });
+  service = createSessionService(repo, truckRepo, {
+    reweighWindowMs: 2 * 60 * 60 * 1000,
+    plateDeductionWindowMs: 24 * 60 * 60 * 1000,
+  });
 });
 
 afterEach(() => {
@@ -565,6 +568,168 @@ describe('SessionService — exit', () => {
       expect(original?.reweighedByTicketId).toBe(firstReweigh.ticket.id);
       const firstReweighReloaded = repo.findById(firstReweigh.ticket.id);
       expect(firstReweighReloaded?.reweighedByTicketId).toBe(secondReweigh.ticket.id);
+    });
+  });
+
+  describe('plate-misread deduction close (master plan §5/§11)', () => {
+    it('closes the single-character-different OPEN ticket when its diff character is anomalously low-confidence', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'PDC0001',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 68120,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+      expect(entrance.ticket.plate).toBe('PDC0001');
+
+      // Exit camera misreads the plate's 4th character ('0' -> '9').
+      const exit = service.handleExitReading({
+        rawPlate: 'PDC9001',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        readQuality: {
+          readPlate: 'PDC9001',
+          confidenceLevel: 96,
+          plateCharBelieve: [99, 99, 99, 60, 99, 99, 99],
+        },
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 22640,
+        weightCaptureFailed: false,
+      });
+
+      expect(exit.kind).toBe('ticket_closed_by_deduction');
+      if (exit.kind !== 'ticket_closed_by_deduction') throw new Error('unreachable');
+      expect(exit.misreadPlate).toBe('PDC9001');
+      expect(exit.ticket.id).toBe(entrance.ticket.id);
+      expect(exit.ticket.plate).toBe('PDC0001');
+      expect(exit.ticket.status).toBe('CLOSED');
+      expect(exit.ticket.exitWeightKg).toBe(22640);
+      expect(exit.ticket.netWeightKg).toBe(68120 - 22640);
+      expect(auditActionsFor(exit.ticket.id)).toEqual(['entry_captured', 'closed_by_plate_deduction']);
+
+      const payloads = auditLogPayloadsFor(exit.ticket.id);
+      const deductionPayload = payloads.find((entry) => entry.action === 'closed_by_plate_deduction')?.payload;
+      expect(deductionPayload).toMatchObject({
+        misreadPlate: 'PDC9001',
+        diffIndex: 3,
+        diffCharConfidence: 60,
+        otherCharsMinConfidence: 99,
+      });
+    });
+
+    it('falls through to ANOMALY when the OPEN ticket is outside the deduction window', () => {
+      const entrance = service.handleEntranceReading({
+        rawPlate: 'PDC0002',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 68120,
+        weightCaptureFailed: false,
+      });
+      if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+      // 25 hours later — past the default 24h window.
+      const exit = service.handleExitReading({
+        rawPlate: 'PDC9002',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-02T09:00:00Z'),
+        readQuality: {
+          readPlate: 'PDC9002',
+          confidenceLevel: 96,
+          plateCharBelieve: [99, 99, 99, 60, 99, 99, 99],
+        },
+        weighingFinishedAt: new Date('2026-01-02T09:00:00Z'),
+        weightKg: 22640,
+        weightCaptureFailed: false,
+      });
+
+      expect(exit.kind).toBe('anomaly_flagged');
+    });
+
+    it('falls through to ANOMALY when two OPEN tickets are equally plausible matches (ambiguous)', () => {
+      service.handleEntranceReading({
+        rawPlate: 'PDC0003',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 68120,
+        weightCaptureFailed: false,
+      });
+      service.handleEntranceReading({
+        rawPlate: 'PDC1003', // also a single-character diff from the exit's PDC9003
+        cameraId: 'cam-entrance-2',
+        timestamp: new Date('2026-01-01T08:05:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:05:00Z'),
+        weightKg: 70000,
+        weightCaptureFailed: false,
+      });
+
+      const exit = service.handleExitReading({
+        rawPlate: 'PDC9003',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        readQuality: {
+          readPlate: 'PDC9003',
+          confidenceLevel: 96,
+          plateCharBelieve: [99, 99, 99, 60, 99, 99, 99],
+        },
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 22640,
+        weightCaptureFailed: false,
+      });
+
+      expect(exit.kind).toBe('anomaly_flagged');
+    });
+
+    it('never deduces a match from a failed capture (falls through to ANOMALY instead)', () => {
+      service.handleEntranceReading({
+        rawPlate: 'PDC0004',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 68120,
+        weightCaptureFailed: false,
+      });
+
+      const exit = service.handleExitReading({
+        rawPlate: 'PDC9004',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        readQuality: {
+          readPlate: 'PDC9004',
+          confidenceLevel: 96,
+          plateCharBelieve: [99, 99, 99, 60, 99, 99, 99],
+        },
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: null,
+        weightCaptureFailed: true,
+      });
+
+      expect(exit.kind).toBe('anomaly_flagged');
+    });
+
+    it('falls through to ANOMALY when there is no plateCharBelieve data (predates the confidence feature)', () => {
+      service.handleEntranceReading({
+        rawPlate: 'PDC0005',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+        weightKg: 68120,
+        weightCaptureFailed: false,
+      });
+
+      const exit = service.handleExitReading({
+        rawPlate: 'PDC9005',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T09:00:00Z'),
+        weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+        weightKg: 22640,
+        weightCaptureFailed: false,
+      });
+
+      expect(exit.kind).toBe('anomaly_flagged');
     });
   });
 

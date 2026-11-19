@@ -246,7 +246,11 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
             pageSize,
           });
           reply.send({
-            items: result.items.map((item) => ({ ...serializeTicket(item), suspectWeight: item.suspectWeight })),
+            items: result.items.map((item) => ({
+              ...serializeTicket(item),
+              suspectWeight: item.suspectWeight,
+              closedByDeduction: item.closedByDeduction,
+            })),
             total: result.total,
             page: result.page,
             pageSize: result.pageSize,

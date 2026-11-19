@@ -400,10 +400,14 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
       await options.driverSignalAdapter.signalDriver('out');
     }
 
-    // ticket_reweighed (master plan §5/§11) is already CLOSED the moment
-    // handleExitReading returns it — print exactly like a normal
-    // ticket_closed.
-    if (result.kind === 'ticket_closed' || result.kind === 'ticket_reweighed') {
+    // ticket_reweighed and ticket_closed_by_deduction (master plan §5/§11)
+    // are already CLOSED the moment handleExitReading returns them — print
+    // exactly like a normal ticket_closed.
+    if (
+      result.kind === 'ticket_closed' ||
+      result.kind === 'ticket_reweighed' ||
+      result.kind === 'ticket_closed_by_deduction'
+    ) {
       await options.printService.printIfNeeded(result.ticket);
     }
 

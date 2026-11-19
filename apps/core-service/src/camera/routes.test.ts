@@ -680,6 +680,36 @@ describe('exit re-weigh', () => {
   });
 });
 
+// See docs/plans/2026-11-18-plate-misread-deduction-plan.md and master plan §5/§11.
+describe('plate-misread deduction close', () => {
+  it('prints and signals the driver, closing the OPEN ticket by deduction instead of filing an ANOMALY', async () => {
+    nextScaleReading = { weightKg: 68120, weightCaptureFailed: false };
+    const entrance = await postEntrance({ plate: 'PDC0001' });
+    expect(entrance.json().kind).toBe('ticket_opened');
+
+    driverSignalCalls = [];
+    printCalls = 0;
+    nextScaleReading = { weightKg: 22640, weightCaptureFailed: false };
+    const exit = await postExit({
+      plate: 'PDC9001', // misread of the entrance's PDC0001 (4th character)
+      confidence: 93,
+      charBelieve: '99,99,99,60,99,99,99',
+    });
+
+    expect(exit.json().kind).toBe('ticket_closed_by_deduction');
+    expect(driverSignalCalls).toEqual(['out']);
+    expect(printCalls).toBe(1);
+
+    const ticket = repo.findById(exit.json().ticketId);
+    expect(ticket?.id).toBe(entrance.json().ticketId);
+    expect(ticket?.plate).toBe('PDC0001');
+    expect(ticket?.status).toBe('CLOSED');
+    expect(ticket?.printedAt).not.toBeNull();
+    expect(ticket?.exitWeightKg).toBe(22640);
+    expect(ticket?.netWeightKg).toBe(68120 - 22640);
+  });
+});
+
 // See docs/plans/2026-11-10-store-anpr-confidence-plan.md.
 describe('ANPR read confidence stored in camera raw events', () => {
   const CHAR_BELIEVE = '41,98,97,99,99,99,99';

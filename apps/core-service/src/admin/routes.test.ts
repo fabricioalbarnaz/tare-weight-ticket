@@ -201,6 +201,24 @@ describe('GET /api/admin/tickets', () => {
     expect(items.find((i) => i.plate === 'SUSP0001')?.suspectWeight).toBe(true);
     expect(items.find((i) => i.plate === 'NORMAL01')?.suspectWeight).toBe(false);
   });
+
+  it('flags closedByDeduction on tickets closed by the plate-misread deduction match', async () => {
+    const cookie = await loginCookie();
+    const deduced = createOpenTicket('DEDU0001');
+    repo.appendAuditLog(deduced.id, 'system', 'closed_by_plate_deduction', {
+      misreadPlate: 'DEDU9001',
+      diffIndex: 3,
+      diffCharConfidence: 60,
+      otherCharsMinConfidence: 99,
+    });
+    createOpenTicket('NORMAL02');
+
+    const response = await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } });
+    const items: Array<{ plate: string; closedByDeduction: boolean }> = response.json().items;
+
+    expect(items.find((i) => i.plate === 'DEDU0001')?.closedByDeduction).toBe(true);
+    expect(items.find((i) => i.plate === 'NORMAL02')?.closedByDeduction).toBe(false);
+  });
 });
 
 describe('GET /api/admin/tickets/:id', () => {

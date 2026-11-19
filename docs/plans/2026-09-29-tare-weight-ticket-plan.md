@@ -235,8 +235,15 @@ the Admin UI for context.
     now exist for the same plate (see the entrance rule above), "the open
     ticket" means the **most recently opened** one; any earlier `OPEN`
     ticket for `X` is left untouched and stays `OPEN`.
-  - No open ticket for `X` → flag as `ANOMALY` raw event (truck leaving
-    without a recorded entrance) — do **not** guess; needs admin
+  - No open ticket for `X`, but a same-length `OPEN` ticket within
+    `PLATE_DEDUCTION_WINDOW_MS` (default 24h) differs from `X` by exactly
+    one character, and that character's ANPR `plateCharBelieve` confidence
+    confirms the misread (**2026-11-18**, see below) → close **that**
+    ticket with this exit's weight instead, exactly like a normal exit
+    close (print, signal driver), flagged `closed_by_plate_deduction`
+    instead of leaving an `ANOMALY` behind.
+  - Otherwise, no open ticket for `X` → flag as `ANOMALY` raw event (truck
+    leaving without a recorded entrance) — do **not** guess; needs admin
     resolution. Do not print automatically.
   - Plate unreadable → same as entrance: logged, no automatic action, needs
     admin. **Decision (2026-11-03):** driver signal withheld here too, for
@@ -313,6 +320,23 @@ the Admin UI for context.
   ticket, set together in the same transaction. Outside the window, or with
   no CLOSED ticket for that plate at all, the reading still falls through to
   the ordinary ANOMALY path, unchanged. See §11.
+- **Plate-misread deduction close (2026-11-18):** a deliberate, narrow
+  reversal of the "misread/unreadable plate is never auto-corrected"
+  principle above, for a specific, confidence-validated failure mode: a
+  single-character plate misread on exit that would otherwise strand an
+  `OPEN` ticket and file a dangling `ANOMALY` (see
+  `docs/runbooks/known-ticket-failure-patterns.md`). When an exit reading
+  has no exact-plate `OPEN` ticket and no re-weigh candidate either, the
+  system checks `OPEN` tickets opened within `PLATE_DEDUCTION_WINDOW_MS`
+  (default 24h) for one whose plate differs from this reading's by exactly
+  one character, and whose ANPR `plateCharBelieve` confirms that exact
+  character is the misread (confidence below 95% **and** at least 15
+  points below every other character in the same reading — the validated
+  shape of every confirmed case). A match closes that ticket immediately
+  with this exit's weight, printed and signaled like a normal close,
+  audited as `closed_by_plate_deduction`. No match (including more than
+  one equally-plausible candidate, or a failed weight capture) falls
+  through to the ordinary `ANOMALY` path, unchanged. See §11.
 - **Print** happens automatically exactly once per ticket transition into
   `CLOSED`, tracked via `printed_at` to avoid duplicate prints from retries;
   Admin UI can force a reprint explicitly.
@@ -1714,3 +1738,80 @@ merge per `CLAUDE.md`):
   plain `entry_captured`.
 - See `docs/plans/2026-11-14-entrance-no-overwrite-plan.md`; delete it once
   this entry is merged.
+
+### Plate-misread deduction close (2026-11-18)
+
+- **User-reported real pattern**: `docs/runbooks/known-ticket-failure-patterns.md`'s
+  "single-character plate misread" investigation found that when an exit
+  reading finds no `OPEN` ticket and gets flagged `ANOMALY`, a real `OPEN`
+  ticket for the same truck often already exists under a plate that
+  differs by exactly one character — and since the 2026-11-10 ANPR
+  confidence feature, that one character's `plateCharBelieve` is reliably
+  a clear outlier versus the other six (validated 5/5 on confidence-backed
+  cases). Two real tickets were stuck `OPEN` in production for days from
+  exactly this (ticket #744/`RKZ6F83` and #598/`IUO8H27`) before an admin
+  manually reconciled them.
+- **Decision (requested by the user, three points confirmed before
+  implementation)**: unlike the runbook's original "surface a suggested
+  correction in the Admin UI" idea, the system now closes the matching
+  `OPEN` ticket **automatically** — no admin step — a deliberate, narrow
+  exception to "a misread/unreadable plate is never auto-corrected; it
+  requires an admin" (§5), accepted by the user as a calculated risk given
+  the 100%-precision validation against known cases.
+  1. **Match criteria**: the differing character's confidence must be
+     below 95% **and** at least 15 points below every other character in
+     the same reading — exactly the shape of all 5 confidence-backed
+     validated cases, not a guessed threshold.
+  2. **Ambiguous match** (more than one `OPEN` candidate qualifies): never
+     auto-close anything — falls through to the ordinary `ANOMALY` path.
+  3. **Eligibility window**: an `OPEN` ticket only qualifies while its
+     `entryAt` is within `PLATE_DEDUCTION_WINDOW_MS` (default 24h) of the
+     exit reading.
+- **Where it lives**: `handleExitReading`'s existing "no `OPEN` ticket"
+  branch in `tickets/session-service.ts`, checked after the exact-plate
+  match and the exit re-weigh candidate, before the `ANOMALY` fallback. A
+  failed weight capture never qualifies (nothing new to attribute), same
+  precedent as the re-weigh branch. The matching itself is a new pure
+  function, `findPlateDeductionMatch` (`tickets/plate-deduction.ts`), built
+  on a new domain helper, `findSingleCharDifferenceIndex`
+  (`domain/plate.ts`) — deliberately scoped to same-length,
+  single-character substitutions only (not a full Levenshtein distance
+  allowing insertions/deletions), since that's the only shape every
+  confidence-backed validated case has and the only shape that maps
+  cleanly onto a single `plateCharBelieve` index. `TicketRepository`
+  gained `findOpenTicketsEnteredAfter(cutoff)` to fetch the candidate
+  `OPEN` tickets. A match closes the ticket (`repo.close`, same as a normal
+  exit), audited as `closed_by_plate_deduction` with the misread plate and
+  the matched/other-character confidence values in the payload; a new
+  `ExitResult`/`WeighingOutcome` kind, `ticket_closed_by_deduction`, is
+  returned alongside the existing kinds. `camera/routes.ts` treats it
+  exactly like `ticket_closed`/`ticket_reweighed` for printing; the driver
+  signal already fires via the existing `else` branch, since this path
+  only triggers when `weightCaptureFailed` is false.
+- **Config**: `PLATE_DEDUCTION_WINDOW_MS` (`tickets/config.ts`,
+  `loadTicketConfig`), default **86400000ms (24h)**, same
+  `parsePositiveInt`-backed pattern as the re-weigh/debounce windows. The
+  two confidence thresholds (95%, 15-point gap) are hardcoded constants in
+  `plate-deduction.ts`, not configurable — they're a validated finding, not
+  an operational tuning knob; changing them needs re-validating against
+  further confirmed cases, same posture as `camera/normalize.ts`'s
+  `MIN_CONFIDENCE_LEVEL`.
+- **Admin UI**: `Ticket` gained `closedByDeduction` — computed the same
+  way as the existing `suspectWeight` flag (`listTickets` scans the audit
+  log for the `closed_by_plate_deduction` action; `TicketTable` shows a
+  small "Deduced"/"Deduzido" badge next to the plate, same visual
+  treatment as `suspectWeight`/the re-weigh badge). `TicketDetailPage`
+  shows a banner naming the misread plate, derived directly from the
+  ticket's own audit log entries (already fetched for that page) rather
+  than a new ticket field, since there's no second ticket to cross-link to
+  (unlike re-weigh, the `ANOMALY` this exit would otherwise have created
+  never exists — the match replaces it before any ticket is written). The
+  live weighing panel's `CLOSING_OUTCOMES` set includes the new outcome
+  (renders as a success, not an alert) plus a non-alert info line calling
+  out that the close was automatic.
+- **Explicitly out of scope**: the two already-stuck tickets (#744/#598)
+  that motivated this — both already well past any reasonable 24h window
+  — were left for an admin to fix manually via the Admin UI, independent
+  of this feature; no retroactive reconciliation job was built.
+- See `docs/plans/2026-11-18-plate-misread-deduction-plan.md`; delete it
+  once this entry is merged.

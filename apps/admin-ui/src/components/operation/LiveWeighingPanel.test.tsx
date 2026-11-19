@@ -154,6 +154,42 @@ describe('LiveWeighingPanel', () => {
     expect(screen.getByText(/12,000|12000/)).toBeInTheDocument();
   });
 
+  it('shows a success state with an info note when a ticket closes by plate-misread deduction', async () => {
+    await goToOperationPage();
+
+    emitToStreams('weighing-result', {
+      direction: 'exit',
+      rawPlate: 'PDC9001',
+      weightKg: 22640,
+      weightCaptureFailed: false,
+      outcome: 'ticket_closed_by_deduction',
+      ticket: {
+        id: 4,
+        ticketNumber: 744,
+        plate: 'PDC0001',
+        status: 'CLOSED',
+        entryAt: new Date().toISOString(),
+        entryWeightKg: 68120,
+        entryCameraId: 'cam-entrance-1',
+        entryCaptureFailed: false,
+        exitAt: new Date().toISOString(),
+        exitWeightKg: 22640,
+        exitCameraId: 'cam-exit-1',
+        exitCaptureFailed: false,
+        netWeightKg: 45480,
+        printedAt: new Date().toISOString(),
+        createdByAdmin: false,
+        notes: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    await waitFor(() => expect(plateField().value).toBe('PDC0001'));
+    expect(screen.getByText(/reading complete/i)).toBeInTheDocument();
+    expect(screen.getByText(/closed automatically by plate-misread deduction/i)).toBeInTheDocument();
+  });
+
   it('shows an alert when the plate cannot be read', async () => {
     await goToOperationPage();
 

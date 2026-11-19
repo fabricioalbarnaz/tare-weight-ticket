@@ -3,6 +3,7 @@ import type { ScaleReadFailureReason } from '../scale/types.js';
 import type { CameraReadQuality } from '../camera/normalize.js';
 import type { TruckRepository } from '../trucks/repository.js';
 import type { TicketConfig } from './config.js';
+import { findPlateDeductionMatch } from './plate-deduction.js';
 import type { Ticket, TicketRepository } from './repository.js';
 
 export const TICKET_AUDIT_ACTIONS = {
@@ -19,6 +20,8 @@ export const TICKET_AUDIT_ACTIONS = {
   REWEIGH_CREATED: 'reweigh_ticket_created',
   /** The original ticket superseded by a REWEIGH_CREATED ticket — the inverse side of that action. */
   REWEIGHED: 'ticket_reweighed',
+  /** An OPEN ticket closed by the plate-misread deduction match instead of filing an ANOMALY — see master plan §5/§11 "Plate-misread deduction close". */
+  CLOSED_BY_PLATE_DEDUCTION: 'closed_by_plate_deduction',
 } as const;
 
 export interface EntranceReadingInput {
@@ -82,6 +85,8 @@ export type ExitResult =
   | { kind: 'anomaly_flagged'; ticket: Ticket }
   /** Re-weigh correction (master plan §5/§11): no OPEN ticket for the plate, but a recently CLOSED one existed — a new ticket was created reusing its entry and closed with this new exit weight. */
   | { kind: 'ticket_reweighed'; ticket: Ticket; originalTicketId: number }
+  /** Plate-misread deduction close (master plan §5/§11): no exact-plate OPEN ticket, but a single-character-different OPEN ticket's per-character ANPR confidence confirmed the misread — that ticket was closed with this exit weight instead of filing an ANOMALY. */
+  | { kind: 'ticket_closed_by_deduction'; ticket: Ticket; misreadPlate: string }
   | { kind: 'plate_unreadable' };
 
 export interface SessionService {
@@ -384,6 +389,56 @@ export function createSessionService(
           );
 
           return { kind: 'ticket_reweighed', ticket, originalTicketId: reweighCandidate.id };
+        }
+
+        // Plate-misread deduction close (master plan §5/§11): still no
+        // exact-plate match and no re-weigh candidate. A failed capture
+        // never qualifies (nothing new to attribute), same precedent as
+        // the re-weigh branch above. Otherwise, check OPEN tickets opened
+        // within the configured window for a single-character-different
+        // plate whose per-character ANPR confidence confirms the misread —
+        // see docs/plans/2026-11-18-plate-misread-deduction-plan.md.
+        const deductionMatch = input.weightCaptureFailed
+          ? undefined
+          : findPlateDeductionMatch(
+              repo.findOpenTicketsEnteredAfter(
+                new Date(input.weighingFinishedAt.getTime() - ticketConfig.plateDeductionWindowMs),
+              ),
+              plate,
+              input.readQuality,
+            );
+
+        if (deductionMatch) {
+          const ticket = repo.close(deductionMatch.ticket.id, {
+            exitAt: input.weighingFinishedAt,
+            exitWeightKg: input.weightKg,
+            exitCameraId: input.cameraId,
+            exitCaptureFailed: false,
+          });
+
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.CLOSED_BY_PLATE_DEDUCTION, {
+            misreadPlate: plate,
+            diffIndex: deductionMatch.diffIndex,
+            diffCharConfidence: deductionMatch.diffCharConfidence,
+            otherCharsMinConfidence: deductionMatch.otherCharsMinConfidence,
+            weightKg: input.weightKg,
+            cameraId: input.cameraId,
+            attemptsUsed: input.attemptsUsed,
+          });
+          repo.recordRawEvent('camera_exit', cameraRawPayload(input, plate), ticket.id);
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'exit',
+              weightKg: input.weightKg,
+              weightCaptureFailed: false,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
+
+          return { kind: 'ticket_closed_by_deduction', ticket, misreadPlate: plate };
         }
 
         const ticket = repo.flagAnomaly({

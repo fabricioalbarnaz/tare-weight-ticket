@@ -73,6 +73,20 @@ describe('TicketDetailPage', () => {
     });
   });
 
+  // See docs/plans/2026-11-18-plate-misread-deduction-plan.md and master
+  // plan §5/§11. Fixture id 9 (ticketNumber #1009) is the deduction-closed
+  // ticket.
+  it('shows a plate-misread deduction banner naming the misread plate', async () => {
+    renderApp({ route: '/tickets/9' });
+    await loginAsAdmin();
+
+    await screen.findByRole('heading', { name: /ticket #1009/i });
+    await waitFor(() => {
+      expect(screen.getByText(/closed automatically by plate-misread deduction/i)).toBeInTheDocument();
+      expect(screen.getByText(/RK76F83/)).toBeInTheDocument();
+    });
+  });
+
   it('reprints a closed ticket after confirmation', async () => {
     renderApp({ route: '/tickets/2' });
     const user = await loginAsAdmin();

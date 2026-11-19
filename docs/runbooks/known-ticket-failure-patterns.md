@@ -413,12 +413,21 @@ since the 2026-11-10 deploy):**
   the fleet; weakness is plate-specific (a given plate's particular
   glyph), not a camera/angle bias toward one slot.
 
-**Suggested fix, not yet implemented:** when an exit finds no matching
-`OPEN` ticket, before filing an `ANOMALY`, check `OPEN` tickets for a
-distance-1 plate match and, if the differing character's
+**Fix implemented (2026-11-18):** when an exit finds no matching `OPEN`
+ticket, before filing an `ANOMALY`, the system now checks `OPEN` tickets
+opened within `PLATE_DEDUCTION_WINDOW_MS` (default 24h) for a
+single-character-different plate match and, if the differing character's
 `plateCharBelieve` is anomalously low relative to the rest of that
-reading, surface it as a suggested correction in the Admin UI instead of
-a bare anomaly (the per-character signal validated 100% reliable above
-makes this tractable). Needs its own `docs/plans/` entry and sign-off
-before implementation, and in the meantime, tickets #744 (id 749) and
-#598 (id 603) above need manual correction.
+reading (below 95% and at least 15 points below every other character —
+the validated shape above), **closes that ticket automatically** with
+this exit's weight, instead of only surfacing a suggestion in the Admin
+UI as originally proposed — a deliberate, user-requested deviation from
+this runbook's original wording, accepted as a calculated risk given the
+100%-precision validation above. An ambiguous match (more than one
+qualifying candidate) still falls through to `ANOMALY`, unchanged. See
+master plan §5/§11 "Plate-misread deduction close" for the full
+implementation.
+
+Tickets #744 (id 749) and #598 (id 603) above are **not** fixed by this
+feature — both are already well past any reasonable 24h eligibility
+window — and still need manual correction via the Admin UI.

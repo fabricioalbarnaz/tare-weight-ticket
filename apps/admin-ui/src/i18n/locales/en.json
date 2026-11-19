@@ -67,6 +67,9 @@
         "exitCaptureFailed": "Exit weight capture failed for {{plate}} — ticket stays open, pending manual correction",
         "anomaly": "Exit with no matching open ticket for {{plate}} — flagged as an anomaly",
         "closedNeedsAttention": "Closed without a confirmed weight on one leg — needs a manual check"
+      },
+      "info": {
+        "closedByDeduction": "Closed automatically by plate-misread deduction — double-check this ticket"
       }
     }
   },
@@ -113,6 +116,7 @@
     "createdByAdmin": "Created manually",
     "reweighOf": "Re-weigh of ticket #{{number}}",
     "reweighedBy": "Superseded by re-weigh ticket #{{number}}",
+    "closedByDeduction": "Closed automatically by plate-misread deduction — the exit camera read \"{{misreadPlate}}\", one character off this ticket's plate. Double-check it.",
     "auditTrail": "Audit trail"
   },
   "unresolvedEvents": {
@@ -314,7 +318,9 @@
       "suspectWeightShort": "Check weight",
       "suspectWeight": "A scale reading for this ticket only resolved after a retry — double-check it wasn't crossed with another truck on the scale around the same time.",
       "reweighShort": "Re-weigh",
-      "reweigh": "This ticket re-weighs the exit of a previously closed ticket for the same plate."
+      "reweigh": "This ticket re-weighs the exit of a previously closed ticket for the same plate.",
+      "deductionShort": "Deduced",
+      "deduction": "This ticket was closed automatically by plate-misread deduction instead of a normal exit match — double-check it."
     },
     "filters": {
       "searchPlaceholder": "Search by plate…"
