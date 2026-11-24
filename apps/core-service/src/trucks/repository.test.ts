@@ -155,4 +155,47 @@ describe('TruckRepository', () => {
       expect(repo.findTruckConjuntoById(inactive.id)?.isActive).toBe(false);
     });
   });
+
+  // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+  describe('listActiveTares', () => {
+    it('returns empty when no truck has an active tare', () => {
+      expect(repo.listActiveTares()).toEqual([]);
+    });
+
+    it('excludes a truck with no conjunto assignment at all', () => {
+      repo.createTruck({ plate: 'NOASSIGN' });
+      expect(repo.listActiveTares()).toEqual([]);
+    });
+
+    it('excludes a truck whose only assignment is inactive', () => {
+      const truck = repo.createTruck({ plate: 'ALLOFF01' });
+      const conjunto = repo.createConjunto({ name: 'AllOff' });
+      repo.assignConjuntoToTruck({ truckId: truck.id, conjuntoId: conjunto.id, tareWeightKg: 7000 });
+
+      expect(repo.listActiveTares()).toEqual([]);
+    });
+
+    it('lists every truck currently holding an active tare, with its plate', () => {
+      const truckA = repo.createTruck({ plate: 'ACTIVE01' });
+      const conjuntoA = repo.createConjunto({ name: 'ConjuntoA' });
+      const assignmentA = repo.assignConjuntoToTruck({ truckId: truckA.id, conjuntoId: conjuntoA.id, tareWeightKg: 9000 });
+      repo.activateTruckConjunto(assignmentA.id);
+
+      const truckB = repo.createTruck({ plate: 'ACTIVE02' });
+      const conjuntoB = repo.createConjunto({ name: 'ConjuntoB' });
+      const conjuntoBOld = repo.createConjunto({ name: 'ConjuntoBOld' });
+      repo.assignConjuntoToTruck({ truckId: truckB.id, conjuntoId: conjuntoBOld.id, tareWeightKg: 1000 });
+      const assignmentB = repo.assignConjuntoToTruck({ truckId: truckB.id, conjuntoId: conjuntoB.id, tareWeightKg: 8200 });
+      repo.activateTruckConjunto(assignmentB.id);
+
+      const tares = repo.listActiveTares();
+      expect(tares).toHaveLength(2);
+      expect(tares).toEqual(
+        expect.arrayContaining([
+          { truckId: truckA.id, plate: 'ACTIVE01', truckConjuntoId: assignmentA.id, tareWeightKg: 9000 },
+          { truckId: truckB.id, plate: 'ACTIVE02', truckConjuntoId: assignmentB.id, tareWeightKg: 8200 },
+        ]),
+      );
+    });
+  });
 });

@@ -1,7 +1,7 @@
 import { normalizePlate } from '../domain/plate.js';
 import type { ScaleReadFailureReason } from '../scale/types.js';
 import type { CameraReadQuality } from '../camera/normalize.js';
-import type { TruckRepository } from '../trucks/repository.js';
+import type { ActiveTare, TruckRepository } from '../trucks/repository.js';
 import type { TicketConfig } from './config.js';
 import { findPlateDeductionMatch } from './plate-deduction.js';
 import type { Ticket, TicketRepository } from './repository.js';
@@ -16,6 +16,10 @@ export const TICKET_AUDIT_ACTIONS = {
   ENTRY_VIA_TARE: 'internal_truck_entry_via_tare',
   /** The exit leg was filled from a registered internal truck's active conjunto tare — see master plan §11. */
   EXIT_VIA_TARE: 'internal_truck_exit_via_tare',
+  /** Same as ENTRY_VIA_TARE, but the truck was found by plate-misread deduction, not an exact plate match — see master plan §5/§11 "Plate-misread deduction for internal trucks". */
+  ENTRY_VIA_TARE_BY_DEDUCTION: 'internal_truck_entry_via_tare_by_deduction',
+  /** Same as EXIT_VIA_TARE, but the truck was found by plate-misread deduction, not an exact plate match. */
+  EXIT_VIA_TARE_BY_DEDUCTION: 'internal_truck_exit_via_tare_by_deduction',
   /** A new ticket created to correct a prior exit weight, reusing a CLOSED ticket's entry — see master plan §5/§11 "Exit re-weigh". */
   REWEIGH_CREATED: 'reweigh_ticket_created',
   /** The original ticket superseded by a REWEIGH_CREATED ticket — the inverse side of that action. */
@@ -54,6 +58,8 @@ export type EntranceResult =
   | { kind: 'ticket_opened'; ticket: Ticket }
   /** Internal truck (master plan §11): the entrance leg was the real weighing, the exit leg came from the active conjunto's tare — ticket closes immediately. */
   | { kind: 'ticket_closed_via_tare'; ticket: Ticket }
+  /** Same as `ticket_closed_via_tare`, but the truck was found by plate-misread deduction — no exact-plate active tare, but a single-character-different one's confidence confirmed the misread (master plan §5/§11 "Plate-misread deduction for internal trucks"). */
+  | { kind: 'ticket_closed_via_tare_by_deduction'; ticket: Ticket; misreadPlate: string }
   | { kind: 'plate_unreadable' };
 
 export interface ExitReadingInput {
@@ -87,6 +93,8 @@ export type ExitResult =
   | { kind: 'ticket_reweighed'; ticket: Ticket; originalTicketId: number }
   /** Plate-misread deduction close (master plan §5/§11): no exact-plate OPEN ticket, but a single-character-different OPEN ticket's per-character ANPR confidence confirmed the misread — that ticket was closed with this exit weight instead of filing an ANOMALY. */
   | { kind: 'ticket_closed_by_deduction'; ticket: Ticket; misreadPlate: string }
+  /** Same idea as `ticket_closed_via_tare` on the entrance side, but for exit: no exact-plate active tare, but a single-character-different one's confidence confirmed the misread (master plan §5/§11 "Plate-misread deduction for internal trucks"). Gets its own kind here (unlike the exact-match tare-exit case, which reuses `ticket_closed`) so it's just as traceable as the entrance side. */
+  | { kind: 'ticket_closed_via_tare_by_deduction'; ticket: Ticket; misreadPlate: string }
   | { kind: 'plate_unreadable' };
 
 export interface SessionService {
@@ -137,17 +145,67 @@ function cameraRawPayload(
   };
 }
 
+/** `resolveActiveTare`'s result when the match came from plate-misread deduction, not an exact lookup. */
+interface ActiveTareDeduction {
+  misreadPlate: string;
+  diffIndex: number;
+  diffCharConfidence: number;
+  otherCharsMinConfidence: number;
+}
+
+interface ResolvedActiveTare {
+  tare: ActiveTare;
+  /** The truck's real registered plate — use this for the ticket, never the (possibly misread) reading. */
+  plate: string;
+  /** Set only when `tare` was found by deduction rather than an exact plate match. */
+  deduction?: ActiveTareDeduction;
+}
+
 export function createSessionService(
   repo: TicketRepository,
   truckRepo: TruckRepository,
   ticketConfig: TicketConfig,
 ): SessionService {
+  /**
+   * Resolves `plate` to an internal truck's active tare, by exact match
+   * first and, failing that, by the same plate-misread deduction rule as
+   * `CLOSED_BY_PLATE_DEDUCTION` — checked against every truck currently
+   * holding an active tare (no time window: a tare is either active now or
+   * not, there's no "age" to bound) — see master plan §5/§11
+   * "Plate-misread deduction for internal trucks" and
+   * docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md. An
+   * ambiguous deduction match (more than one equally-plausible truck) is
+   * `undefined`, same as no match at all — callers already have a
+   * well-defined "not an internal truck" fallback.
+   */
+  function resolveActiveTare(
+    plate: string,
+    readQuality: CameraReadQuality | undefined,
+  ): ResolvedActiveTare | undefined {
+    const exact = truckRepo.findActiveTareByPlate(plate);
+    if (exact) return { tare: exact, plate };
+
+    const match = findPlateDeductionMatch(truckRepo.listActiveTares(), plate, readQuality);
+    if (!match) return undefined;
+
+    return {
+      tare: match.candidate,
+      plate: match.candidate.plate,
+      deduction: {
+        misreadPlate: plate,
+        diffIndex: match.diffIndex,
+        diffCharConfidence: match.diffCharConfidence,
+        otherCharsMinConfidence: match.otherCharsMinConfidence,
+      },
+    };
+  }
+
   return {
     hasResolvableExitCandidate(rawPlate, readQuality, now) {
       const plate = normalizePlate(rawPlate);
       if (plate === '') return true;
 
-      if (truckRepo.findActiveTareByPlate(plate)) return true;
+      if (resolveActiveTare(plate, readQuality)) return true;
       if (repo.findOpenByPlate(plate)) return true;
 
       const reweighCandidate = repo.findMostRecentClosedTicketByPlate(plate);
@@ -174,11 +232,11 @@ export function createSessionService(
         return { kind: 'plate_unreadable' };
       }
 
-      const activeTare = truckRepo.findActiveTareByPlate(plate);
-      if (activeTare) {
+      const resolvedTare = resolveActiveTare(plate, input.readQuality);
+      if (resolvedTare) {
         return repo.transaction((): EntranceResult => {
           const opened = repo.create({
-            plate,
+            plate: resolvedTare.plate,
             entryAt: input.weighingFinishedAt,
             entryWeightKg: input.weightKg,
             entryCameraId: input.cameraId,
@@ -186,7 +244,7 @@ export function createSessionService(
           });
           const ticket = repo.close(opened.id, {
             exitAt: input.weighingFinishedAt,
-            exitWeightKg: activeTare.tareWeightKg,
+            exitWeightKg: resolvedTare.tare.tareWeightKg,
             exitCameraId: null,
             exitCaptureFailed: false,
           });
@@ -199,10 +257,16 @@ export function createSessionService(
               : TICKET_AUDIT_ACTIONS.ENTRY_CAPTURED,
             { weightKg: input.weightKg, cameraId: input.cameraId, attemptsUsed: input.attemptsUsed },
           );
-          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_VIA_TARE, {
-            truckConjuntoId: activeTare.truckConjuntoId,
-            tareWeightKg: activeTare.tareWeightKg,
-          });
+          repo.appendAuditLog(
+            ticket.id,
+            'system',
+            resolvedTare.deduction ? TICKET_AUDIT_ACTIONS.EXIT_VIA_TARE_BY_DEDUCTION : TICKET_AUDIT_ACTIONS.EXIT_VIA_TARE,
+            {
+              truckConjuntoId: resolvedTare.tare.truckConjuntoId,
+              tareWeightKg: resolvedTare.tare.tareWeightKg,
+              ...resolvedTare.deduction,
+            },
+          );
           repo.recordRawEvent(
             'camera_entrance',
             cameraRawPayload(input, plate),
@@ -220,7 +284,9 @@ export function createSessionService(
             ticket.id,
           );
 
-          return { kind: 'ticket_closed_via_tare', ticket };
+          return resolvedTare.deduction
+            ? { kind: 'ticket_closed_via_tare_by_deduction', ticket, misreadPlate: resolvedTare.deduction.misreadPlate }
+            : { kind: 'ticket_closed_via_tare', ticket };
         });
       }
 
@@ -271,13 +337,13 @@ export function createSessionService(
         return { kind: 'plate_unreadable' };
       }
 
-      const activeTare = truckRepo.findActiveTareByPlate(plate);
-      if (activeTare) {
+      const resolvedTare = resolveActiveTare(plate, input.readQuality);
+      if (resolvedTare) {
         return repo.transaction((): ExitResult => {
           const opened = repo.create({
-            plate,
+            plate: resolvedTare.plate,
             entryAt: input.weighingFinishedAt,
-            entryWeightKg: activeTare.tareWeightKg,
+            entryWeightKg: resolvedTare.tare.tareWeightKg,
             entryCameraId: null,
             entryCaptureFailed: false,
           });
@@ -288,10 +354,16 @@ export function createSessionService(
             exitCaptureFailed: input.weightCaptureFailed,
           });
 
-          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE, {
-            truckConjuntoId: activeTare.truckConjuntoId,
-            tareWeightKg: activeTare.tareWeightKg,
-          });
+          repo.appendAuditLog(
+            ticket.id,
+            'system',
+            resolvedTare.deduction ? TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE_BY_DEDUCTION : TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE,
+            {
+              truckConjuntoId: resolvedTare.tare.truckConjuntoId,
+              tareWeightKg: resolvedTare.tare.tareWeightKg,
+              ...resolvedTare.deduction,
+            },
+          );
           repo.appendAuditLog(
             ticket.id,
             'system',
@@ -317,7 +389,9 @@ export function createSessionService(
             ticket.id,
           );
 
-          return { kind: 'ticket_closed', ticket };
+          return resolvedTare.deduction
+            ? { kind: 'ticket_closed_via_tare_by_deduction', ticket, misreadPlate: resolvedTare.deduction.misreadPlate }
+            : { kind: 'ticket_closed', ticket };
         });
       }
 
@@ -454,7 +528,7 @@ export function createSessionService(
             );
 
         if (deductionMatch) {
-          const ticket = repo.close(deductionMatch.ticket.id, {
+          const ticket = repo.close(deductionMatch.candidate.id, {
             exitAt: input.weighingFinishedAt,
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,

@@ -33,6 +33,17 @@ export interface ActiveTare {
   tareWeightKg: number;
 }
 
+/**
+ * An `ActiveTare` plus the truck's own registered plate — needed to run
+ * the plate-misread deduction match (which needs every candidate's real
+ * plate to diff against a reading) against the whole currently-active-tare
+ * fleet, not just a single looked-up plate — see
+ * docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+ */
+export interface ActiveTareWithPlate extends ActiveTare {
+  plate: string;
+}
+
 export interface TruckRepository {
   listTrucks(): InternalTruck[];
   findTruckById(truckId: number): InternalTruck | undefined;
@@ -61,6 +72,16 @@ export interface TruckRepository {
    * see master plan §11).
    */
   findActiveTareByPlate(plate: string): ActiveTare | undefined;
+
+  /**
+   * Every truck currently holding an active tare, with its registered
+   * plate — the candidate pool for the plate-misread deduction match on
+   * internal trucks (no exact-plate match found) — see
+   * docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md. Expected
+   * to be small (this install's whole internal fleet), same posture as
+   * `TicketRepository.findOpenTicketsEnteredAfter`.
+   */
+  listActiveTares(): ActiveTareWithPlate[];
 
   findAuditLogByTruckId(truckId: number): TruckAuditLogEntry[];
   appendAuditLog(truckId: number, actor: string, action: string, payload?: unknown): void;
@@ -206,6 +227,20 @@ export function createTruckRepository(db: Db): TruckRepository {
         truckConjuntoId: activeAssignment.id,
         tareWeightKg: activeAssignment.tareWeightKg,
       };
+    },
+
+    listActiveTares() {
+      return db
+        .select({
+          truckId: internalTrucks.id,
+          plate: internalTrucks.plate,
+          truckConjuntoId: truckConjuntos.id,
+          tareWeightKg: truckConjuntos.tareWeightKg,
+        })
+        .from(truckConjuntos)
+        .innerJoin(internalTrucks, eq(truckConjuntos.truckId, internalTrucks.id))
+        .where(eq(truckConjuntos.isActive, true))
+        .all();
     },
 
     findAuditLogByTruckId(truckId) {

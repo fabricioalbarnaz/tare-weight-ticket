@@ -40,7 +40,7 @@ describe('findPlateDeductionMatch', () => {
     const match = findPlateDeductionMatch(candidates, 'RK76F83', readQuality);
 
     expect(match).toEqual({
-      ticket: candidates[0],
+      candidate: candidates[0],
       diffIndex: 2,
       diffCharConfidence: 67,
       otherCharsMinConfidence: 99,

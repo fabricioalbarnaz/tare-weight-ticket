@@ -57,6 +57,15 @@ export interface Ticket {
    * tickets returned by `listTickets`, same as `suspectWeight`.
    */
   closedByDeduction?: boolean;
+
+  /**
+   * True when this ticket's entry or exit leg was resolved via an
+   * internal truck's tare by plate-misread deduction, not an exact plate
+   * match — see docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+   * Only present on tickets returned by `listTickets`, same as
+   * `closedByDeduction`.
+   */
+  closedViaTareByDeduction?: boolean;
 }
 
 export interface AuditLogEntry {

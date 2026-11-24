@@ -48,6 +48,18 @@ export function TicketDetailPage() {
   const deductionEntry = auditLog.find((entry) => entry.action === 'closed_by_plate_deduction');
   const misreadPlate = (deductionEntry?.payload as { misreadPlate?: string } | null)?.misreadPlate ?? '';
 
+  // Plate-misread deduction for internal trucks (master plan §5/§11,
+  // docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md): same
+  // idea as the deduction banner above, but for the entry or exit leg
+  // being resolved via an internal truck's tare instead of an exact plate
+  // match.
+  const tareDeductionEntry = auditLog.find(
+    (entry) =>
+      entry.action === 'internal_truck_entry_via_tare_by_deduction' ||
+      entry.action === 'internal_truck_exit_via_tare_by_deduction',
+  );
+  const tareMisreadPlate = (tareDeductionEntry?.payload as { misreadPlate?: string } | null)?.misreadPlate ?? '';
+
   return (
     <div>
       <Link
@@ -91,6 +103,11 @@ export function TicketDetailPage() {
           {deductionEntry && (
             <p className="mt-1 text-sm text-amber-700">
               {t('ticketDetail.closedByDeduction', { misreadPlate })}
+            </p>
+          )}
+          {tareDeductionEntry && (
+            <p className="mt-1 text-sm text-amber-700">
+              {t('ticketDetail.closedViaTareByDeduction', { misreadPlate: tareMisreadPlate })}
             </p>
           )}
         </div>

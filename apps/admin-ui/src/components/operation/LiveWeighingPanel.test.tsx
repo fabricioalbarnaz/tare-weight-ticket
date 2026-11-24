@@ -190,6 +190,43 @@ describe('LiveWeighingPanel', () => {
     expect(screen.getByText(/closed automatically by plate-misread deduction/i)).toBeInTheDocument();
   });
 
+  // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+  it('shows a success state with an info note when an internal truck is resolved via tare by plate-misread deduction', async () => {
+    await goToOperationPage();
+
+    emitToStreams('weighing-result', {
+      direction: 'exit',
+      rawPlate: 'ITD9001',
+      weightKg: 23000,
+      weightCaptureFailed: false,
+      outcome: 'ticket_closed_via_tare_by_deduction',
+      ticket: {
+        id: 5,
+        ticketNumber: 745,
+        plate: 'ITD0001',
+        status: 'CLOSED',
+        entryAt: new Date().toISOString(),
+        entryWeightKg: 9000,
+        entryCameraId: null,
+        entryCaptureFailed: false,
+        exitAt: new Date().toISOString(),
+        exitWeightKg: 23000,
+        exitCameraId: 'cam-exit-1',
+        exitCaptureFailed: false,
+        netWeightKg: 14000,
+        printedAt: new Date().toISOString(),
+        createdByAdmin: false,
+        notes: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    await waitFor(() => expect(plateField().value).toBe('ITD0001'));
+    expect(screen.getByText(/reading complete/i)).toBeInTheDocument();
+    expect(screen.getByText(/resolved via an internal truck's tare/i)).toBeInTheDocument();
+  });
+
   it('shows an alert when the plate cannot be read', async () => {
     await goToOperationPage();
 

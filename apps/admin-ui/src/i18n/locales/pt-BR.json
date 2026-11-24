@@ -69,7 +69,8 @@
         "closedNeedsAttention": "Fechado sem peso confirmado em uma das pernas — requer verificação manual"
       },
       "info": {
-        "closedByDeduction": "Fechado automaticamente por dedução de placa — confira este ticket"
+        "closedByDeduction": "Fechado automaticamente por dedução de placa — confira este ticket",
+        "closedViaTareByDeduction": "Resolvido via tara de um caminhão interno, encontrado por dedução de placa — confira este ticket"
       }
     }
   },
@@ -117,6 +118,7 @@
     "reweighOf": "Repesagem do ticket #{{number}}",
     "reweighedBy": "Substituído pelo ticket de repesagem #{{number}}",
     "closedByDeduction": "Fechado automaticamente por dedução de placa — a câmera de saída leu \"{{misreadPlate}}\", um caractere diferente da placa deste ticket. Confira.",
+    "closedViaTareByDeduction": "Resolvido via a tara deste caminhão interno — a câmera leu \"{{misreadPlate}}\", um caractere diferente da placa cadastrada. Confira.",
     "auditTrail": "Trilha de auditoria"
   },
   "unresolvedEvents": {
@@ -320,7 +322,9 @@
       "reweighShort": "Repesagem",
       "reweigh": "Este ticket repesa a saída de um ticket já fechado para a mesma placa.",
       "deductionShort": "Deduzido",
-      "deduction": "Este ticket foi fechado automaticamente por dedução de placa, em vez de um match normal de saída — confira."
+      "deduction": "Este ticket foi fechado automaticamente por dedução de placa, em vez de um match normal de saída — confira.",
+      "tareDeductionShort": "Tara (deduzida)",
+      "tareDeduction": "Este ticket foi resolvido via a tara de um caminhão interno, encontrado por dedução de placa em vez de um match exato — confira."
     },
     "filters": {
       "searchPlaceholder": "Buscar por placa…"

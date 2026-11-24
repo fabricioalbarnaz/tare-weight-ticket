@@ -68,6 +68,14 @@ export function TicketTable({
                   {t('tickets.table.deductionShort')}
                 </span>
               )}
+              {ticket.closedViaTareByDeduction && (
+                <span
+                  className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                  title={t('tickets.table.tareDeduction')}
+                >
+                  {t('tickets.table.tareDeductionShort')}
+                </span>
+              )}
             </td>
             <td className="py-2 pr-4">
               <StatusBadge ticket={ticket} />

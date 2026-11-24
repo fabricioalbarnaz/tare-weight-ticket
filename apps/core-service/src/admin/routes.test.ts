@@ -219,6 +219,27 @@ describe('GET /api/admin/tickets', () => {
     expect(items.find((i) => i.plate === 'DEDU0001')?.closedByDeduction).toBe(true);
     expect(items.find((i) => i.plate === 'NORMAL02')?.closedByDeduction).toBe(false);
   });
+
+  // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+  it('flags closedViaTareByDeduction on tickets resolved via an internal truck tare by plate-misread deduction', async () => {
+    const cookie = await loginCookie();
+    const tareDeduced = createOpenTicket('TDED0001');
+    repo.appendAuditLog(tareDeduced.id, 'system', 'internal_truck_exit_via_tare_by_deduction', {
+      truckConjuntoId: 1,
+      tareWeightKg: 9000,
+      misreadPlate: 'TDED9001',
+      diffIndex: 3,
+      diffCharConfidence: 60,
+      otherCharsMinConfidence: 99,
+    });
+    createOpenTicket('NORMAL03');
+
+    const response = await app.inject({ method: 'GET', url: '/api/admin/tickets', headers: { cookie } });
+    const items: Array<{ plate: string; closedViaTareByDeduction: boolean }> = response.json().items;
+
+    expect(items.find((i) => i.plate === 'TDED0001')?.closedViaTareByDeduction).toBe(true);
+    expect(items.find((i) => i.plate === 'NORMAL03')?.closedViaTareByDeduction).toBe(false);
+  });
 });
 
 describe('GET /api/admin/tickets/:id', () => {

@@ -189,6 +189,11 @@ the Admin UI for context.
 ## 5. Business rules (session state machine)
 
 - **Entrance camera fires** for plate `X`:
+  - Before any of the below: if `X` (or, failing that, a single-character
+    misread of `X`, **2026-11-23**, see §11 "Plate-misread deduction for
+    internal trucks") matches a registered internal truck currently
+    holding an active conjunto tare, the ticket closes immediately via
+    that tare instead — see §11 "internal trucks".
   - No open ticket for `X` → create new `OPEN` ticket, start scale read
     (wait for stable weight), fill `entry_weight_kg`/`entry_at`, trigger
     driver signal.
@@ -232,6 +237,10 @@ the Admin UI for context.
   rollback bounce). An unreadable plate never debounces and is never
   debounced against. See §11 for the full rationale.
 - **Exit camera fires** for plate `X`:
+  - Before any of the below: same internal-truck active-tare check as the
+    entrance side above (exact match, then plate-misread deduction) — see
+    §11 "internal trucks" and "Plate-misread deduction for internal
+    trucks".
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
     print job. **Updated 2026-11-14:** since more than one `OPEN` ticket can
@@ -1928,3 +1937,66 @@ merge per `CLAUDE.md`):
   status today.
 - See `docs/plans/2026-11-23-exit-no-ticket-discard-plan.md`; delete it
   once this entry is merged.
+
+### Plate-misread deduction for internal trucks (2026-11-23)
+
+- **Decision (requested by the user, clarified via follow-up questions)**:
+  an internal truck (one with an active conjunto tare) was previously
+  matched by **exact** plate only (`truckRepo.findActiveTareByPlate`), on
+  both the entrance and exit legs. A misread of that truck's plate fell
+  through to the ordinary (non-internal) ticket flow — and since internal
+  trucks never leave an `OPEN` ticket behind (entry+exit always resolve
+  atomically via the tare), the existing "Plate-misread deduction close"
+  feature above could never rescue it either, since that one only matches
+  against `OPEN` tickets. Now, on **both** legs, when the exact lookup
+  fails, the system also checks whether the read plate is a
+  single-character misread — same confidence-validated criteria as the
+  `OPEN`-ticket feature (diff char confidence < 95%, at least 15 points
+  below every other character) — of **any truck currently holding an
+  active tare**. A unique match is treated exactly like an exact match,
+  using the truck's **real registered plate** (never the misread one) for
+  the ticket. An ambiguous match (more than one equally-plausible truck)
+  is treated as no match — falls through to the ordinary non-internal
+  flow, same conservative rule as the `OPEN`-ticket feature.
+- **No time window**: unlike the `OPEN`-ticket deduction (bounded by
+  `PLATE_DEDUCTION_WINDOW_MS`, since an `OPEN` ticket can go stale), there
+  is no "age" dimension here — a truck's tare is either currently active
+  or not. Every currently-active-tare truck is a candidate,
+  unconditionally, confirmed explicitly with the user.
+- **Full traceability, by request**: new `TICKET_AUDIT_ACTIONS`
+  `ENTRY_VIA_TARE_BY_DEDUCTION`/`EXIT_VIA_TARE_BY_DEDUCTION` (parallel to
+  `ENTRY_VIA_TARE`/`EXIT_VIA_TARE`), and a new shared result kind on both
+  `EntranceResult` and `ExitResult`,
+  `ticket_closed_via_tare_by_deduction` (carries `misreadPlate`). Unlike
+  the exact-match tare-exit case (which reuses the plain `ticket_closed`
+  kind), the deduced exit case gets its own kind too, so both legs are
+  equally traceable — `camera/routes.ts`'s exit print-trigger condition
+  was extended to include it explicitly.
+- **Shared match algorithm**: `tickets/plate-deduction.ts`'s
+  `findPlateDeductionMatch` was generalized (generic over any candidate
+  with a `plate: string`, not just `Ticket`) instead of duplicating its
+  validated threshold logic a second time — one source of truth serves
+  both the `OPEN`-ticket feature and this one. `trucks/repository.ts`
+  gained `listActiveTares()` (every truck with a currently-active
+  conjunto assignment, joined for its plate) as the candidate pool.
+  `tickets/session-service.ts` gained a private `resolveActiveTare`
+  helper (exact match, then deduction) used by `handleEntranceReading`,
+  `handleExitReading`, **and** `hasResolvableExitCandidate` (the
+  pre-capture gate from "Exit reading discarded when no ticket can be
+  resolved" above) — that last one needed updating too, otherwise a
+  misread internal-truck exit would have been wrongly discarded before
+  ever reaching this logic.
+- **Admin UI**: same exposure as the `OPEN`-ticket deduction feature, by
+  request — `Ticket` gained `closedViaTareByDeduction` (computed the same
+  way as `closedByDeduction`, scanning the audit log for either new
+  action); `TicketTable` shows a small badge; `TicketDetailPage` shows a
+  banner derived directly from the audit log entry's `misreadPlate`
+  payload (no second ticket to cross-link to, same reasoning as the
+  `OPEN`-ticket feature); the live weighing panel's `CLOSING_OUTCOMES`
+  includes the new outcome plus a non-alert info line.
+- **Explicitly out of scope**: the two already-stuck tickets mentioned in
+  the "Plate-misread deduction close" entry above are unrelated (they're
+  `OPEN`-ticket cases, not internal trucks); no retroactive reconciliation
+  job was built here either.
+- See `docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md`;
+  delete it once this entry is merged.

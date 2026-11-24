@@ -234,6 +234,27 @@ function buildInitialStore(): FixtureStore {
     closedByDeduction: true,
   });
 
+  // Plate-misread deduction for internal trucks (master plan §5/§11,
+  // docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md): an
+  // internal truck's exit camera misread one character of its registered
+  // plate ('0' -> '9'), but the per-character ANPR confidence confirmed
+  // it, so the system closed the ticket via the truck's tare using its
+  // real plate instead of opening a new (external) ticket under the
+  // misread one.
+  const tareDeductionClosed = makeTicket({
+    plate: 'ITD0001',
+    status: 'CLOSED',
+    entryAt: hoursAgo(1),
+    entryWeightKg: 9430,
+    entryCameraId: null,
+    exitAt: hoursAgo(0.9),
+    exitWeightKg: 24150,
+    exitCameraId: 'cam-exit-1',
+    netWeightKg: 14720,
+    printedAt: hoursAgo(0.9),
+    closedViaTareByDeduction: true,
+  });
+
   const tickets = [
     open,
     closed,
@@ -244,6 +265,7 @@ function buildInitialStore(): FixtureStore {
     reweighOriginal,
     reweigh,
     deductionClosed,
+    tareDeductionClosed,
   ];
 
   const auditLog: AuditLogEntry[] = [
@@ -314,6 +336,18 @@ function buildInitialStore(): FixtureStore {
       otherCharsMinConfidence: 99,
       weightKg: deductionClosed.exitWeightKg,
       cameraId: deductionClosed.exitCameraId,
+    }),
+    makeAuditEntry(tareDeductionClosed.id, 'system', 'internal_truck_entry_via_tare_by_deduction', {
+      truckConjuntoId: 1,
+      tareWeightKg: 9000,
+      misreadPlate: 'ITD9001',
+      diffIndex: 3,
+      diffCharConfidence: 60,
+      otherCharsMinConfidence: 99,
+    }),
+    makeAuditEntry(tareDeductionClosed.id, 'system', 'exit_captured', {
+      weightKg: tareDeductionClosed.exitWeightKg,
+      cameraId: tareDeductionClosed.exitCameraId,
     }),
   ];
 

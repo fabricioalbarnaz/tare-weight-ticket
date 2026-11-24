@@ -250,6 +250,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
               ...serializeTicket(item),
               suspectWeight: item.suspectWeight,
               closedByDeduction: item.closedByDeduction,
+              closedViaTareByDeduction: item.closedViaTareByDeduction,
             })),
             total: result.total,
             page: result.page,

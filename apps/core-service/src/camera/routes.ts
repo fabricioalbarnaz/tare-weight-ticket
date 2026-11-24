@@ -376,7 +376,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     // entrance leg — the exit leg comes from the registered tare, not a
     // later webhook — so printing has to be triggered here too, not just
     // in the exit handler below.
-    if (result.kind === 'ticket_closed_via_tare') {
+    if (result.kind === 'ticket_closed_via_tare' || result.kind === 'ticket_closed_via_tare_by_deduction') {
       await options.printService.printIfNeeded(result.ticket);
     }
 
@@ -451,7 +451,8 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     if (
       result.kind === 'ticket_closed' ||
       result.kind === 'ticket_reweighed' ||
-      result.kind === 'ticket_closed_by_deduction'
+      result.kind === 'ticket_closed_by_deduction' ||
+      result.kind === 'ticket_closed_via_tare_by_deduction'
     ) {
       await options.printService.printIfNeeded(result.ticket);
     }

@@ -25,6 +25,8 @@ export interface TicketListItem extends Ticket {
   suspectWeight: boolean;
   /** True when this ticket was closed by the plate-misread deduction match instead of a normal exit — see docs/plans/2026-11-18-plate-misread-deduction-plan.md. */
   closedByDeduction: boolean;
+  /** True when this ticket's entry or exit leg was resolved via an internal truck's tare by plate-misread deduction, not an exact plate match — see docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md. */
+  closedViaTareByDeduction: boolean;
 }
 
 export interface Paginated<T> {
@@ -221,6 +223,30 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
     return new Set(entries.map((entry) => entry.ticketId));
   }
 
+  /**
+   * Ticket ids among `ticketIds` with an `internal_truck_entry_via_tare_by_deduction`
+   * or `internal_truck_exit_via_tare_by_deduction` audit log entry — see
+   * docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md. Same
+   * shape as `findDeductionClosedTicketIds`, just a different pair of
+   * action names.
+   */
+  function findTareDeductionTicketIds(ticketIds: number[]): Set<number> {
+    const entries = db
+      .select({ ticketId: ticketAuditLog.ticketId })
+      .from(ticketAuditLog)
+      .where(
+        and(
+          inArray(ticketAuditLog.ticketId, ticketIds),
+          inArray(ticketAuditLog.action, [
+            'internal_truck_entry_via_tare_by_deduction',
+            'internal_truck_exit_via_tare_by_deduction',
+          ]),
+        ),
+      )
+      .all();
+    return new Set(entries.map((entry) => entry.ticketId));
+  }
+
   return {
     findOpenByPlate(plate) {
       return db
@@ -271,10 +297,12 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
       const ticketIds = items.map((t) => t.id);
       const suspectTicketIds = items.length > 0 ? findSuspectTicketIds(ticketIds) : new Set<number>();
       const deductionClosedTicketIds = items.length > 0 ? findDeductionClosedTicketIds(ticketIds) : new Set<number>();
+      const tareDeductionTicketIds = items.length > 0 ? findTareDeductionTicketIds(ticketIds) : new Set<number>();
       const itemsWithFlags = items.map((item) => ({
         ...item,
         suspectWeight: suspectTicketIds.has(item.id),
         closedByDeduction: deductionClosedTicketIds.has(item.id),
+        closedViaTareByDeduction: tareDeductionTicketIds.has(item.id),
       }));
 
       return { items: itemsWithFlags, total, page, pageSize };

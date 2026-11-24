@@ -576,6 +576,40 @@ describe('TicketRepository', () => {
       expect(byId.get(deduced.id)).toBe(true);
       expect(byId.get(normal.id)).toBe(false);
     });
+
+    // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+    it('flags closedViaTareByDeduction when an audit log entry recorded either tare-by-deduction action', () => {
+      const viaDeduction = repo.create({
+        plate: 'TDED0001',
+        entryAt: new Date(),
+        entryWeightKg: 21000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(viaDeduction.id, 'system', 'internal_truck_exit_via_tare_by_deduction', {
+        truckConjuntoId: 1,
+        tareWeightKg: 9000,
+        misreadPlate: 'TDED9001',
+        diffIndex: 3,
+        diffCharConfidence: 60,
+        otherCharsMinConfidence: 99,
+      });
+
+      const normal = repo.create({
+        plate: 'TDED0002',
+        entryAt: new Date(),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(normal.id, 'system', 'exit_captured', { weightKg: 500, cameraId: 'cam-2' });
+
+      const result = repo.listTickets({});
+
+      const byId = new Map(result.items.map((t) => [t.id, t.closedViaTareByDeduction]));
+      expect(byId.get(viaDeduction.id)).toBe(true);
+      expect(byId.get(normal.id)).toBe(false);
+    });
   });
 
   describe('listUnresolvedEvents', () => {

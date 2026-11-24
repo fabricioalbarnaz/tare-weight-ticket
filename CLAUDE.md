@@ -305,6 +305,30 @@ scale-capture call. Verified via the Alpine container
 only touched workspace). Not yet deployed to any production install — see
 master plan §5/§11 and `docs/plans/2026-11-23-exit-no-ticket-discard-plan.md`.
 
+**Plate-misread deduction for internal trucks (2026-11-23):** at the
+user's explicit request, the internal-truck active-tare lookup (on both
+entrance and exit) is no longer exact-match only — if the exact lookup
+fails, it now also checks whether the read plate is a single-character
+misread of any truck currently holding an active tare (same
+confidence-validated criteria as the existing `OPEN`-ticket
+plate-misread-deduction feature, reused via a generalized
+`findPlateDeductionMatch`, not duplicated). No time window (a tare is
+either active now or not — confirmed with the user). A unique match
+resolves exactly like an exact match, using the truck's real plate; an
+ambiguous match falls through to the ordinary flow, unchanged. Full
+traceability by request: new audit actions
+`internal_truck_entry_via_tare_by_deduction`/
+`internal_truck_exit_via_tare_by_deduction` and a new shared result kind
+`ticket_closed_via_tare_by_deduction`, plus the same Admin UI exposure as
+the `OPEN`-ticket deduction feature (badge, detail banner, live-panel info
+line). The pre-capture exit discard gate (previous entry below) was also
+updated to recognize this case, so a misread internal-truck exit is never
+wrongly discarded before reaching it. Verified via the Alpine container
+(core-service: `lint`/`typecheck`/`test`/`build`; admin-ui: native
+`typecheck`/`test`). Not yet deployed to any production install — see
+master plan §5/§11 and
+`docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md`.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

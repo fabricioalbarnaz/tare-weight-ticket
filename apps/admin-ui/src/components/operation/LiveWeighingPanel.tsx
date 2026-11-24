@@ -16,6 +16,7 @@ const AUTO_CLEAR_MS = 7000;
 const CLOSING_OUTCOMES = new Set<WeighingResultEvent['outcome']>([
   'ticket_closed',
   'ticket_closed_via_tare',
+  'ticket_closed_via_tare_by_deduction',
   'ticket_reweighed',
   'ticket_closed_by_deduction',
 ]);
@@ -145,6 +146,9 @@ export function LiveWeighingPanel() {
           {alert && <p className="mt-2 text-xs font-medium text-red-800">{t('operation.panel.alerts.closedNeedsAttention')}</p>}
           {state.event.outcome === 'ticket_closed_by_deduction' && (
             <p className="mt-2 text-xs font-medium text-amber-700">{t('operation.panel.info.closedByDeduction')}</p>
+          )}
+          {state.event.outcome === 'ticket_closed_via_tare_by_deduction' && (
+            <p className="mt-2 text-xs font-medium text-amber-700">{t('operation.panel.info.closedViaTareByDeduction')}</p>
           )}
         </div>
       )}

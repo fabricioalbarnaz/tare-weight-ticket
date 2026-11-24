@@ -1072,6 +1072,18 @@ describe('hasResolvableExitCandidate (master plan §5/§11)', () => {
 
     expect(service.hasResolvableExitCandidate('HRC0005', undefined, new Date('2026-01-01T09:00:00Z'))).toBe(true);
   });
+
+  it('returns true for an active internal-truck tare found by plate-misread deduction', () => {
+    const truck = truckRepo.createTruck({ plate: 'HRC0006', label: 'Test truck' });
+    const conjunto = truckRepo.createConjunto({ name: 'Conjunto HRC0006' });
+    const assignment = truckRepo.assignConjuntoToTruck({ truckId: truck.id, conjuntoId: conjunto.id, tareWeightKg: 9000 });
+    truckRepo.activateTruckConjunto(assignment.id);
+
+    const readQuality = { readPlate: 'HRC9006', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] };
+    expect(
+      service.hasResolvableExitCandidate('HRC9006', readQuality, new Date('2026-01-01T09:00:00Z')),
+    ).toBe(true);
+  });
 });
 
 describe('SessionService — internal trucks (pre-registered tare)', () => {
@@ -1215,5 +1227,98 @@ describe('SessionService — internal trucks (pre-registered tare)', () => {
         payload: { truckConjuntoId: expect.any(Number), tareWeightKg: 9000 },
       },
     ]);
+  });
+
+  // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+  describe('plate-misread deduction (no exact-plate active tare)', () => {
+    it('closes via tare on an entrance reading whose plate is a one-character misread of an active-tare truck', () => {
+      registerTruckWithActiveTare('ITD0001', 9000);
+
+      const result = service.handleEntranceReading({
+        rawPlate: 'ITD9001', // misread of ITD0001 (4th character)
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        readQuality: { readPlate: 'ITD9001', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] },
+        weighingFinishedAt: new Date('2026-01-01T08:00:01Z'),
+        weightKg: 21000,
+        weightCaptureFailed: false,
+      });
+
+      expect(result.kind).toBe('ticket_closed_via_tare_by_deduction');
+      if (result.kind !== 'ticket_closed_via_tare_by_deduction') throw new Error('unreachable');
+      expect(result.misreadPlate).toBe('ITD9001');
+      // The ticket itself uses the truck's real registered plate, never the misread one.
+      expect(result.ticket.plate).toBe('ITD0001');
+      expect(result.ticket.status).toBe('CLOSED');
+      expect(result.ticket.exitWeightKg).toBe(9000);
+      expect(auditActionsFor(result.ticket.id)).toEqual([
+        'entry_captured',
+        'internal_truck_exit_via_tare_by_deduction',
+      ]);
+      const payload = auditLogPayloadsFor(result.ticket.id).find(
+        (entry) => entry.action === 'internal_truck_exit_via_tare_by_deduction',
+      )?.payload;
+      expect(payload).toMatchObject({ misreadPlate: 'ITD9001', diffIndex: 3, diffCharConfidence: 60, otherCharsMinConfidence: 99 });
+    });
+
+    it('closes via tare on an exit reading whose plate is a one-character misread of an active-tare truck', () => {
+      registerTruckWithActiveTare('ITD0002', 9000);
+
+      const result = service.handleExitReading({
+        rawPlate: 'ITD9002',
+        cameraId: 'cam-exit-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        readQuality: { readPlate: 'ITD9002', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] },
+        weighingFinishedAt: new Date('2026-01-01T08:00:01Z'),
+        weightKg: 23000,
+        weightCaptureFailed: false,
+      });
+
+      expect(result.kind).toBe('ticket_closed_via_tare_by_deduction');
+      if (result.kind !== 'ticket_closed_via_tare_by_deduction') throw new Error('unreachable');
+      expect(result.misreadPlate).toBe('ITD9002');
+      expect(result.ticket.plate).toBe('ITD0002');
+      expect(result.ticket.status).toBe('CLOSED');
+      expect(result.ticket.entryWeightKg).toBe(9000);
+      expect(auditActionsFor(result.ticket.id)).toEqual([
+        'internal_truck_entry_via_tare_by_deduction',
+        'exit_captured',
+      ]);
+    });
+
+    it('falls through to the normal external-truck flow when two active-tare trucks are equally plausible matches (ambiguous)', () => {
+      registerTruckWithActiveTare('ITD0003', 9000);
+      registerTruckWithActiveTare('ITD1003', 8500); // also a single-character diff from ITD9003
+
+      const result = service.handleEntranceReading({
+        rawPlate: 'ITD9003',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        readQuality: { readPlate: 'ITD9003', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] },
+        weighingFinishedAt: new Date('2026-01-01T08:00:01Z'),
+        weightKg: 18000,
+        weightCaptureFailed: false,
+      });
+
+      expect(result.kind).toBe('ticket_opened');
+      if (result.kind !== 'ticket_opened') throw new Error('unreachable');
+      expect(result.ticket.plate).toBe('ITD9003');
+    });
+
+    it('never matches a truck whose tare was never activated', () => {
+      truckRepo.createTruck({ plate: 'ITD0004', label: 'No active tare' });
+
+      const result = service.handleEntranceReading({
+        rawPlate: 'ITD9004',
+        cameraId: 'cam-entrance-1',
+        timestamp: new Date('2026-01-01T08:00:00Z'),
+        readQuality: { readPlate: 'ITD9004', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] },
+        weighingFinishedAt: new Date('2026-01-01T08:00:01Z'),
+        weightKg: 18000,
+        weightCaptureFailed: false,
+      });
+
+      expect(result.kind).toBe('ticket_opened');
+    });
   });
 });

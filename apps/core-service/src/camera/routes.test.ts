@@ -1069,4 +1069,47 @@ describe('internal trucks (pre-registered tare)', () => {
     expect(response.json().kind).toBe('ticket_opened');
     expect(repo.findOpenByPlate('INT0004')?.status).toBe('OPEN');
   });
+
+  // See docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md.
+  describe('plate-misread deduction (no exact-plate active tare)', () => {
+    it('closes via tare, prints, and signals the driver on an entrance reading whose plate is a misread of an active-tare truck', async () => {
+      registerTruckWithActiveTare('ITD0001', 9000);
+      nextScaleReading = { weightKg: 21000, weightCaptureFailed: false };
+
+      const response = await postEntrance({
+        plate: 'ITD9001', // misread of ITD0001 (4th character)
+        confidence: 93,
+        charBelieve: '99,99,99,60,99,99,99',
+      });
+
+      expect(response.json().kind).toBe('ticket_closed_via_tare_by_deduction');
+      const ticket = repo.findById(response.json().ticketId);
+      expect(ticket?.plate).toBe('ITD0001');
+      expect(ticket?.status).toBe('CLOSED');
+      expect(ticket?.exitWeightKg).toBe(9000);
+      expect(driverSignalCalls).toEqual(['in']);
+      expect(printCalls).toBe(1);
+      expect(ticket?.printedAt).not.toBeNull();
+    });
+
+    it('closes via tare, prints, and signals the driver on an exit reading whose plate is a misread of an active-tare truck', async () => {
+      registerTruckWithActiveTare('ITD0002', 9000);
+      nextScaleReading = { weightKg: 23000, weightCaptureFailed: false };
+
+      const response = await postExit({
+        plate: 'ITD9002',
+        confidence: 93,
+        charBelieve: '99,99,99,60,99,99,99',
+      });
+
+      expect(response.json().kind).toBe('ticket_closed_via_tare_by_deduction');
+      const ticket = repo.findById(response.json().ticketId);
+      expect(ticket?.plate).toBe('ITD0002');
+      expect(ticket?.status).toBe('CLOSED');
+      expect(ticket?.entryWeightKg).toBe(9000);
+      expect(driverSignalCalls).toEqual(['out']);
+      expect(printCalls).toBe(1);
+      expect(ticket?.printedAt).not.toBeNull();
+    });
+  });
 });

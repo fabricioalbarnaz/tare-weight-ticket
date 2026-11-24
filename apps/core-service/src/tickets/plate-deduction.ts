@@ -1,6 +1,5 @@
 import { findSingleCharDifferenceIndex } from '../domain/plate.js';
 import type { CameraReadQuality } from '../camera/normalize.js';
-import type { Ticket } from './repository.js';
 
 /**
  * Validated against this install's data (docs/runbooks/known-ticket-failure-patterns.md,
@@ -14,32 +13,36 @@ import type { Ticket } from './repository.js';
 const MAX_DIFF_CHAR_CONFIDENCE = 95;
 const MIN_CONFIDENCE_GAP = 15;
 
-export interface PlateDeductionMatch {
-  ticket: Ticket;
+export interface PlateDeductionMatch<T> {
+  candidate: T;
   diffIndex: number;
   diffCharConfidence: number;
   otherCharsMinConfidence: number;
 }
 
 /**
- * Finds the single `OPEN` ticket among `candidates` whose plate this exit
- * reading's `misreadPlate` is a one-character misread of, per the ANPR
- * per-character confidence data — see
- * docs/plans/2026-11-18-plate-misread-deduction-plan.md. Deliberately
- * conservative: returns `undefined` (never guesses) when there's no usable
- * confidence data, when no candidate's differing character meets the
- * criteria above, or when more than one candidate qualifies (ambiguous).
+ * Finds the single candidate among `candidates` whose plate this reading's
+ * `misreadPlate` is a one-character misread of, per the ANPR per-character
+ * confidence data — see docs/plans/2026-11-18-plate-misread-deduction-plan.md.
+ * Generic over any candidate with a `plate`, so the same validated match
+ * rule serves both `OPEN` tickets (the original use) and active-tare
+ * trucks (docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md) —
+ * one source of truth for the threshold logic, never duplicated.
+ * Deliberately conservative: returns `undefined` (never guesses) when
+ * there's no usable confidence data, when no candidate's differing
+ * character meets the criteria above, or when more than one candidate
+ * qualifies (ambiguous).
  */
-export function findPlateDeductionMatch(
-  candidates: Ticket[],
+export function findPlateDeductionMatch<T extends { plate: string }>(
+  candidates: T[],
   misreadPlate: string,
   readQuality: CameraReadQuality | undefined,
-): PlateDeductionMatch | undefined {
+): PlateDeductionMatch<T> | undefined {
   if (!readQuality || readQuality.plateCharBelieve.length !== misreadPlate.length) {
     return undefined;
   }
 
-  const matches: PlateDeductionMatch[] = [];
+  const matches: PlateDeductionMatch<T>[] = [];
   for (const candidate of candidates) {
     const diffIndex = findSingleCharDifferenceIndex(candidate.plate, misreadPlate);
     if (diffIndex === null) continue;
@@ -53,7 +56,7 @@ export function findPlateDeductionMatch(
       diffCharConfidence < MAX_DIFF_CHAR_CONFIDENCE &&
       otherCharsMinConfidence - diffCharConfidence >= MIN_CONFIDENCE_GAP
     ) {
-      matches.push({ ticket: candidate, diffIndex, diffCharConfidence, otherCharsMinConfidence });
+      matches.push({ candidate, diffIndex, diffCharConfidence, otherCharsMinConfidence });
     }
   }
 

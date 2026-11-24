@@ -69,7 +69,8 @@
         "closedNeedsAttention": "Closed without a confirmed weight on one leg — needs a manual check"
       },
       "info": {
-        "closedByDeduction": "Closed automatically by plate-misread deduction — double-check this ticket"
+        "closedByDeduction": "Closed automatically by plate-misread deduction — double-check this ticket",
+        "closedViaTareByDeduction": "Resolved via an internal truck's tare, found by plate-misread deduction — double-check this ticket"
       }
     }
   },
@@ -117,6 +118,7 @@
     "reweighOf": "Re-weigh of ticket #{{number}}",
     "reweighedBy": "Superseded by re-weigh ticket #{{number}}",
     "closedByDeduction": "Closed automatically by plate-misread deduction — the exit camera read \"{{misreadPlate}}\", one character off this ticket's plate. Double-check it.",
+    "closedViaTareByDeduction": "Resolved via this internal truck's tare — the camera read \"{{misreadPlate}}\", one character off its registered plate. Double-check it.",
     "auditTrail": "Audit trail"
   },
   "unresolvedEvents": {
@@ -320,7 +322,9 @@
       "reweighShort": "Re-weigh",
       "reweigh": "This ticket re-weighs the exit of a previously closed ticket for the same plate.",
       "deductionShort": "Deduced",
-      "deduction": "This ticket was closed automatically by plate-misread deduction instead of a normal exit match — double-check it."
+      "deduction": "This ticket was closed automatically by plate-misread deduction instead of a normal exit match — double-check it.",
+      "tareDeductionShort": "Tare (deduced)",
+      "tareDeduction": "This ticket was resolved via an internal truck's tare, found by plate-misread deduction instead of an exact plate match — double-check it."
     },
     "filters": {
       "searchPlaceholder": "Search by plate…"
