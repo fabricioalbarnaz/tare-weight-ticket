@@ -25,6 +25,10 @@ export default tseslint.config(
     languageOptions: {
       globals: globals.node,
     },
+    rules: {
+      // .cjs files are CommonJS by definition — require() there is correct, not a lint mistake.
+      '@typescript-eslint/no-require-imports': 'off',
+    },
   },
   {
     files: ['apps/admin-ui/**/*.{ts,tsx}'],

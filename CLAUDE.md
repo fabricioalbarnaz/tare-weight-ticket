@@ -311,8 +311,7 @@ own decision tree, without needing a captured weight) and a new
 `camera/routes.ts` gate, `checkNoResolvableExitCandidate`, run before the
 scale-capture call. Verified via the Alpine container
 (`lint`/`typecheck`/`build` clean; `test` passing for `core-service`, the
-only touched workspace). Not yet deployed to any production install — see
-master plan §5/§11 and `docs/plans/2026-11-23-exit-no-ticket-discard-plan.md`.
+only touched workspace). See master plan §5/§11.
 
 **Plate-misread deduction for internal trucks (2026-11-23):** at the
 user's explicit request, the internal-truck active-tare lookup (on both
@@ -334,9 +333,31 @@ line). The pre-capture exit discard gate (previous entry below) was also
 updated to recognize this case, so a misread internal-truck exit is never
 wrongly discarded before reaching it. Verified via the Alpine container
 (core-service: `lint`/`typecheck`/`test`/`build`; admin-ui: native
-`typecheck`/`test`). Not yet deployed to any production install — see
-master plan §5/§11 and
-`docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md`.
+`typecheck`/`test`). See master plan §5/§11.
+
+**One-time EOD-cleanup script added to the repo (2026-11-23):** the
+`scripts/close-open-tickets-20261119.cjs` script that closed every ticket
+left `OPEN` for more than 2h, at the user's request, as a one-time
+Windows-Task-Scheduler run on 2026-11-19 (no print/signal, audited as
+`closed_by_eod_cleanup_20261119`, self-deleting its own scheduled task),
+is committed here for the record only — it already ran and is not
+re-executed by this or any later deploy. Required one small fix to land
+cleanly: `eslint.config.js`'s existing `**/scripts/**/*.{js,mjs,cjs}`
+override also now disables `@typescript-eslint/no-require-imports` for
+those files, since a `.cjs` script is CommonJS by definition and `require()`
+there isn't a lint mistake.
+
+**Redeploy (2026-11-23):** the exit-no-ticket discard gate and the
+internal-truck plate-misread deduction feature above (no schema change,
+business-logic only) were deployed to this production install, together
+with the `scripts/` lint-config fix noted above. Verified via the Alpine
+container (`lint`/`typecheck`/`build` clean; `test` 431/431 core-service +
+15/15 print-bridge + 11/11 scale-bridge, no flake this run). Live
+`tare.sqlite` backed up online (`better-sqlite3` `.backup()`) to
+`data/backup-before-rebuild-20261123/tare.online-backup.sqlite` and the
+prior image tagged `docker-core-service:rollback-20261123` before
+rebuilding. Post-deploy: container healthy, ticket count unchanged
+(949 / last id 954), no errors in startup logs.
 
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
