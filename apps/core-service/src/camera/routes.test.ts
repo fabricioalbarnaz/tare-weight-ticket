@@ -412,13 +412,94 @@ describe('POST /webhooks/camera/exit', () => {
     expect(ticket?.printedAt).not.toBeNull();
   });
 
-  it('flags an anomaly when there is no open ticket for the plate', async () => {
+  // See docs/plans/2026-11-23-exit-no-ticket-discard-plan.md and master
+  // plan §5/§11 — superseded the old "flags an anomaly when there is no
+  // open ticket for the plate" behavior: when nothing (exact match,
+  // re-weigh, deduction) can resolve the reading, it is now discarded
+  // before the scale is ever read, instead of being flagged ANOMALY.
+  it('discards the reading and never attempts a scale capture when no ticket can be resolved for the plate', async () => {
     const response = await postExit({ plate: 'NOENTR1' });
 
-    expect(response.json().kind).toBe('anomaly_flagged');
-    const ticket = repo.findById(response.json().ticketId);
-    expect(ticket?.status).toBe('ANOMALY');
+    expect(response.json()).toEqual({ kind: 'reading_no_matching_ticket' });
+    expect(scaleContexts).toEqual([]);
+    expect(driverSignalCalls).toEqual([]);
     expect(printCalls).toBe(0);
+    expect(repo.listTickets({}).items).toEqual([]);
+
+    const discarded = cameraRawEvents().find((e) => e.payload.discarded === 'no_matching_ticket_for_exit');
+    expect(discarded).toBeDefined();
+    expect(discarded?.payload).toMatchObject({ rawPlate: 'NOENTR1' });
+  });
+
+  it('still attempts the scale capture for a re-weigh candidate, even with no OPEN ticket for the plate', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'NMT0001' });
+    nextScaleReading = { weightKg: 19500, weightCaptureFailed: false };
+    const firstExit = await postExit({ plate: 'NMT0001' });
+
+    const originalTicket = repo.findById(firstExit.json().ticketId)!;
+    repo.correctExit(originalTicket.id, {
+      exitAt: new Date(Date.now() - 5 * 60 * 1000),
+      exitWeightKg: originalTicket.exitWeightKg,
+      exitCameraId: originalTicket.exitCameraId,
+      exitCaptureFailed: false,
+    });
+
+    scaleContexts = [];
+    nextScaleReading = { weightKg: 8000, weightCaptureFailed: false };
+    const reweigh = await postExit({ plate: 'NMT0001' });
+
+    expect(reweigh.json().kind).toBe('ticket_reweighed');
+    expect(scaleContexts.length).toBe(1);
+  });
+
+  it('still attempts the scale capture for a plate-misread deduction candidate, even with no exact-plate OPEN ticket', async () => {
+    nextScaleReading = { weightKg: 68120, weightCaptureFailed: false };
+    await postEntrance({ plate: 'NMT0002' });
+
+    scaleContexts = [];
+    nextScaleReading = { weightKg: 22640, weightCaptureFailed: false };
+    const exit = await postExit({
+      plate: 'NMT9002', // misread of the entrance's NMT0002 (4th character)
+      confidence: 93,
+      charBelieve: '99,99,99,60,99,99,99',
+    });
+
+    expect(exit.json().kind).toBe('ticket_closed_by_deduction');
+    expect(scaleContexts.length).toBe(1);
+  });
+
+  it('does not discard an unreliable/unreadable plate — still handled as plate_unreadable', async () => {
+    const response = await postExit({ plate: 'NOENTR2', confidence: 50 });
+
+    // Unchanged pre-existing behavior: an unreadable plate still goes
+    // through the scale capture (its weight is simply never attributed to
+    // anything) — the new gate is specifically a no-op here, it must not
+    // turn this into 'reading_no_matching_ticket'.
+    expect(response.json()).toEqual({ kind: 'plate_unreadable' });
+    expect(scaleContexts.length).toBe(1);
+  });
+
+  it('still flags an anomaly if a found re-weigh candidate exists but the scale capture then fails', async () => {
+    nextScaleReading = { weightKg: 20000, weightCaptureFailed: false };
+    await postEntrance({ plate: 'NMT0003' });
+    nextScaleReading = { weightKg: 19500, weightCaptureFailed: false };
+    const firstExit = await postExit({ plate: 'NMT0003' });
+
+    const originalTicket = repo.findById(firstExit.json().ticketId)!;
+    repo.correctExit(originalTicket.id, {
+      exitAt: new Date(Date.now() - 5 * 60 * 1000),
+      exitWeightKg: originalTicket.exitWeightKg,
+      exitCameraId: originalTicket.exitCameraId,
+      exitCaptureFailed: false,
+    });
+
+    nextScaleReading = { weightKg: null, weightCaptureFailed: true };
+    const failedExit = await postExit({ plate: 'NMT0003' });
+
+    expect(failedExit.json().kind).toBe('anomaly_flagged');
+    const ticket = repo.findById(failedExit.json().ticketId);
+    expect(ticket?.status).toBe('ANOMALY');
   });
 
   it('leaves the ticket OPEN and withholds the driver signal when the exit scale read times out', async () => {

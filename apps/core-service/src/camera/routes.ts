@@ -243,6 +243,50 @@ function checkPreempted(
   return true;
 }
 
+/**
+ * Discards an exit reading for a plate the system cannot resolve to any
+ * ticket action right now — no exact `OPEN` ticket, no re-weigh candidate,
+ * no plate-misread deduction candidate, and no active internal-truck tare
+ * (`SessionService.hasResolvableExitCandidate`, which mirrors
+ * `handleExitReading`'s own decision tree) — see master plan §5/§11 "Exit
+ * reading discarded when no ticket can be resolved" and
+ * docs/plans/2026-11-23-exit-no-ticket-discard-plan.md. Checked *before*
+ * the scale capture starts: a truck is never weighed for a reading that
+ * cannot be attributed to any ticket. Deliberately does not apply to an
+ * unreliable/unreadable plate (`event.rawPlate === ''`) — that case is
+ * unchanged, handled downstream as `plate_unreadable`. Does not remove the
+ * `ANOMALY` outcome from the system: if a candidate *is* found here but
+ * the scale capture then fails, `handleExitReading` still falls through to
+ * `flagAnomaly`, unchanged. Returns true (and has already replied) when
+ * the reading was discarded.
+ */
+function checkNoResolvableExitCandidate(
+  options: CameraRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  event: NormalizedCameraEvent,
+  triggeredAt: Date,
+): boolean {
+  if (event.rawPlate === '') return false;
+  if (options.sessionService.hasResolvableExitCandidate(event.rawPlate, event.readQuality, triggeredAt)) {
+    return false;
+  }
+
+  request.log.warn(
+    { plate: event.rawPlate, cameraId: event.cameraId },
+    'camera: exit reading discarded — no OPEN ticket, re-weigh candidate, or plate-misread deduction candidate found for this plate; weight capture skipped entirely (see docs/plans/2026-11-23-exit-no-ticket-discard-plan.md)',
+  );
+  options.recordRawEvent('camera_exit', {
+    rawPlate: event.rawPlate,
+    cameraId: event.cameraId,
+    triggeredAt,
+    discarded: 'no_matching_ticket_for_exit',
+    ...event.readQuality,
+  });
+  reply.send({ kind: 'reading_no_matching_ticket' });
+  return true;
+}
+
 export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutesOptions): void {
   app.post('/webhooks/camera/entrance', async (request, reply) => {
     // Captured before the scale wait — only used for the post-release
@@ -350,6 +394,7 @@ export function registerCameraRoutes(app: FastifyInstance, options: CameraRoutes
     const event = normalizeCameraPayload(anprEvent);
     if (checkPostReleaseDebounce(options, request, reply, 'exit', event, triggeredAt)) return;
     if (checkDuplicatePlateRead(options, request, reply, 'exit', event, triggeredAt)) return;
+    if (checkNoResolvableExitCandidate(options, request, reply, event, triggeredAt)) return;
 
     options.weighingEvents.emitPlateReceived({ direction: 'exit', rawPlate: event.rawPlate });
 

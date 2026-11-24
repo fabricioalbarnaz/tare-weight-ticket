@@ -284,6 +284,27 @@ further loosening of the same gate, independent of the length-check
 removal. Implemented and verified this session (not yet redeployed to
 the production install).
 
+**Exit reading discarded when no ticket can be resolved (2026-11-23):** at
+the user's explicit request, an exit camera reading for a plate with no
+exact-plate `OPEN` ticket, no exit re-weigh candidate, and no
+plate-misread deduction candidate is now discarded *before the scale is
+ever read* — logged to `raw_events` (`discarded:
+'no_matching_ticket_for_exit'`) and replied to with `{ kind:
+'reading_no_matching_ticket' }`, with no scale capture, no driver signal,
+and no ticket of any kind. This replaces the `ANOMALY` ticket this exact
+scenario used to produce. Re-weigh correction and plate-misread deduction
+still run with the same priority as before and are unaffected; `ANOMALY`
+itself is not removed from the system — it stays reachable whenever one of
+those two candidates *is* found (so the capture is attempted) but the
+scale capture itself then fails, exactly as before. Implemented via a new
+`SessionService.hasResolvableExitCandidate` (mirrors `handleExitReading`'s
+own decision tree, without needing a captured weight) and a new
+`camera/routes.ts` gate, `checkNoResolvableExitCandidate`, run before the
+scale-capture call. Verified via the Alpine container
+(`lint`/`typecheck`/`build` clean; `test` passing for `core-service`, the
+only touched workspace). Not yet deployed to any production install — see
+master plan §5/§11 and `docs/plans/2026-11-23-exit-no-ticket-discard-plan.md`.
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

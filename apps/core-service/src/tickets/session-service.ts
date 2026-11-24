@@ -92,6 +92,28 @@ export type ExitResult =
 export interface SessionService {
   handleEntranceReading(input: EntranceReadingInput): EntranceResult;
   handleExitReading(input: ExitReadingInput): ExitResult;
+  /**
+   * Read-only check for whether an exit reading for `rawPlate` could
+   * resolve to *any* ticket action right now: an exact `OPEN` match, an
+   * active internal-truck tare, a re-weigh candidate (recently `CLOSED`,
+   * within the re-weigh window), or a plate-misread deduction candidate
+   * (an `OPEN` ticket within the deduction window whose plate this is a
+   * confirmed single-character misread of). Mirrors the same decision
+   * tree `handleExitReading` uses below, but without requiring a captured
+   * weight — none of those four checks need one. Used by
+   * `camera/routes.ts` to decide, *before* starting a scale capture,
+   * whether an exit reading is worth weighing at all — see master plan
+   * §5/§11 "Exit reading discarded when no ticket can be resolved" and
+   * docs/plans/2026-11-23-exit-no-ticket-discard-plan.md. An
+   * unreliable/unreadable plate (normalizes to `''`) always returns
+   * `true` — not this check's concern, left to the existing
+   * `plate_unreadable` path.
+   */
+  hasResolvableExitCandidate(
+    rawPlate: string,
+    readQuality: CameraReadQuality | undefined,
+    now: Date,
+  ): boolean;
 }
 
 /**
@@ -121,6 +143,29 @@ export function createSessionService(
   ticketConfig: TicketConfig,
 ): SessionService {
   return {
+    hasResolvableExitCandidate(rawPlate, readQuality, now) {
+      const plate = normalizePlate(rawPlate);
+      if (plate === '') return true;
+
+      if (truckRepo.findActiveTareByPlate(plate)) return true;
+      if (repo.findOpenByPlate(plate)) return true;
+
+      const reweighCandidate = repo.findMostRecentClosedTicketByPlate(plate);
+      if (
+        reweighCandidate?.exitAt != null &&
+        now.getTime() - reweighCandidate.exitAt.getTime() <= ticketConfig.reweighWindowMs
+      ) {
+        return true;
+      }
+
+      const deductionMatch = findPlateDeductionMatch(
+        repo.findOpenTicketsEnteredAfter(new Date(now.getTime() - ticketConfig.plateDeductionWindowMs)),
+        plate,
+        readQuality,
+      );
+      return deductionMatch !== undefined;
+    },
+
     handleEntranceReading(input) {
       const plate = normalizePlate(input.rawPlate);
 

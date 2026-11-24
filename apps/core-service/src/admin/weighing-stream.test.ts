@@ -301,17 +301,50 @@ describe('weighing narration on GET /api/admin/tickets/stream', () => {
     expect((result?.data as { ticket: unknown }).ticket).toMatchObject({ status: 'OPEN' });
   });
 
-  it('emits anomaly_flagged when an exit has no matching open ticket', async () => {
+  // See docs/plans/2026-11-23-exit-no-ticket-discard-plan.md and master
+  // plan §5/§11 — superseded the old "emits anomaly_flagged when an exit
+  // has no matching open ticket" behavior: this reading is now discarded
+  // before the scale is ever read, so neither weighing-plate-received nor
+  // weighing-result is ever emitted for it.
+  it('emits no weighing-plate-received or weighing-result frame when an exit has no matching open ticket', async () => {
     const cookie = await loginCookie();
     nextScaleReading = { weightKg: 15000, weightCaptureFailed: false };
 
-    const frames = await collectSseEventsUntil(cookie, 'weighing-result', () =>
-      postCameraEvent('/webhooks/camera/exit', { plate: 'GHOST01' }),
-    );
+    const controller = new AbortController();
+    const streamResponse = await fetch(`${baseUrl}/api/admin/tickets/stream`, {
+      headers: { Cookie: cookie },
+      signal: controller.signal,
+    });
+    const reader = streamResponse.body!.getReader();
+    const decoder = new TextDecoder();
+    const collected: SseFrame[] = [];
+    let buffer = '';
 
-    const result = frames.find((frame) => frame.event === 'weighing-result');
-    expect(result?.data).toMatchObject({ direction: 'exit', outcome: 'anomaly_flagged', weightKg: 15000 });
-    expect((result?.data as { ticket: unknown }).ticket).toMatchObject({ status: 'ANOMALY' });
+    const readLoop = (async () => {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value);
+        const { frames, rest } = parseSseFrames(buffer);
+        collected.push(...frames);
+        buffer = rest;
+      }
+    })();
+
+    // Give the stream a moment to attach its listeners before triggering,
+    // same as collectSseEventsUntil above.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const response = await postCameraEvent('/webhooks/camera/exit', { plate: 'GHOST01' });
+    expect(await response.json()).toEqual({ kind: 'reading_no_matching_ticket' });
+
+    // Give any (unexpected) async narration a moment to arrive before
+    // concluding none did.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    controller.abort();
+    await readLoop.catch(() => {});
+
+    expect(collected.find((frame) => frame.event === 'weighing-plate-received')).toBeUndefined();
+    expect(collected.find((frame) => frame.event === 'weighing-result')).toBeUndefined();
   });
 
   it('emits plate_unreadable with no ticket when the plate cannot be read', async () => {

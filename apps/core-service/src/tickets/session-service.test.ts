@@ -973,6 +973,107 @@ describe('SessionService — exit', () => {
   });
 });
 
+// See docs/plans/2026-11-23-exit-no-ticket-discard-plan.md and master plan §5/§11.
+describe('hasResolvableExitCandidate (master plan §5/§11)', () => {
+  it('returns false when there is no OPEN ticket, re-weigh candidate, or deduction candidate for the plate', () => {
+    expect(service.hasResolvableExitCandidate('NORES01', undefined, new Date('2026-01-01T09:00:00Z'))).toBe(false);
+  });
+
+  it('returns true for an empty/unreadable plate — not this check\'s concern', () => {
+    expect(service.hasResolvableExitCandidate('', undefined, new Date('2026-01-01T09:00:00Z'))).toBe(true);
+  });
+
+  it('returns true when an exact OPEN ticket exists for the plate', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'HRC0001',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    expect(service.hasResolvableExitCandidate('HRC0001', undefined, new Date('2026-01-01T09:00:00Z'))).toBe(true);
+  });
+
+  it('returns true when a recently CLOSED ticket qualifies as a re-weigh candidate, false once outside the window', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'HRC0002',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 20000,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+    const firstExit = service.handleExitReading({
+      rawPlate: 'HRC0002',
+      cameraId: 'cam-exit-1',
+      timestamp: new Date('2026-01-01T09:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T09:00:00Z'),
+      weightKg: 19500,
+      weightCaptureFailed: false,
+    });
+    if (firstExit.kind !== 'ticket_closed') throw new Error('unreachable');
+
+    // 30 minutes later — within the default 2h re-weigh window.
+    expect(service.hasResolvableExitCandidate('HRC0002', undefined, new Date('2026-01-01T09:30:00Z'))).toBe(true);
+    // 3 hours later — past the default 2h window.
+    expect(service.hasResolvableExitCandidate('HRC0002', undefined, new Date('2026-01-01T12:00:00Z'))).toBe(false);
+  });
+
+  it('returns true when a single-character-different OPEN ticket is a confirmed plate-misread candidate', () => {
+    const entrance = service.handleEntranceReading({
+      rawPlate: 'HRC0003',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 68120,
+      weightCaptureFailed: false,
+    });
+    if (entrance.kind !== 'ticket_opened') throw new Error('unreachable');
+
+    const readQuality = { readPlate: 'HRC9003', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] };
+    expect(
+      service.hasResolvableExitCandidate('HRC9003', readQuality, new Date('2026-01-01T09:00:00Z')),
+    ).toBe(true);
+  });
+
+  it('returns false when two OPEN tickets are equally plausible deduction matches (ambiguous)', () => {
+    service.handleEntranceReading({
+      rawPlate: 'HRC0004',
+      cameraId: 'cam-entrance-1',
+      timestamp: new Date('2026-01-01T08:00:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:00:00Z'),
+      weightKg: 68120,
+      weightCaptureFailed: false,
+    });
+    service.handleEntranceReading({
+      rawPlate: 'HRC1004', // also a single-character diff from the exit's HRC9004
+      cameraId: 'cam-entrance-2',
+      timestamp: new Date('2026-01-01T08:05:00Z'),
+      weighingFinishedAt: new Date('2026-01-01T08:05:00Z'),
+      weightKg: 51000,
+      weightCaptureFailed: false,
+    });
+
+    const readQuality = { readPlate: 'HRC9004', confidenceLevel: 96, plateCharBelieve: [99, 99, 99, 60, 99, 99, 99] };
+    expect(
+      service.hasResolvableExitCandidate('HRC9004', readQuality, new Date('2026-01-01T09:00:00Z')),
+    ).toBe(false);
+  });
+
+  it('returns true for an active internal-truck tare even with no OPEN ticket for the plate', () => {
+    const truck = truckRepo.createTruck({ plate: 'HRC0005', label: 'Test truck' });
+    const conjunto = truckRepo.createConjunto({ name: 'Conjunto HRC0005' });
+    const assignment = truckRepo.assignConjuntoToTruck({ truckId: truck.id, conjuntoId: conjunto.id, tareWeightKg: 9000 });
+    truckRepo.activateTruckConjunto(assignment.id);
+
+    expect(service.hasResolvableExitCandidate('HRC0005', undefined, new Date('2026-01-01T09:00:00Z'))).toBe(true);
+  });
+});
+
 describe('SessionService — internal trucks (pre-registered tare)', () => {
   function registerTruckWithActiveTare(plate: string, tareWeightKg: number): void {
     const truck = truckRepo.createTruck({ plate, label: 'Test truck' });

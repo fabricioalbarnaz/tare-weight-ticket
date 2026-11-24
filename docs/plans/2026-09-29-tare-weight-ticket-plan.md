@@ -245,8 +245,17 @@ the Admin UI for context.
     ticket with this exit's weight instead, exactly like a normal exit
     close (print, signal driver), flagged `closed_by_plate_deduction`
     instead of leaving an `ANOMALY` behind.
-  - Otherwise, no open ticket for `X` → flag as `ANOMALY` raw event (truck
-    leaving without a recorded entrance) — do **not** guess; needs admin
+  - Otherwise — no open ticket, no re-weigh candidate, and no deduction
+    candidate for `X` (**2026-11-23**, see below) → the reading is
+    discarded *before the scale is ever read*: logged to `raw_events` as
+    `discarded: 'no_matching_ticket_for_exit'`, no ticket of any kind
+    created, no driver signal, no print. Superseded the original "flag
+    `ANOMALY`" outcome for this exact case — see §11.
+  - If one of the three checks above *does* find a candidate but the
+    scale capture itself then fails, the reading still falls through to
+    `ANOMALY`, unchanged — flag as `ANOMALY` raw event (truck leaving
+    without a recorded entrance, or a re-weigh/deduction candidate that
+    can't be attributed a weight) — do **not** guess; needs admin
     resolution. Do not print automatically.
   - Plate unreadable → same as entrance: logged, no automatic action, needs
     admin. **Decision (2026-11-03):** driver signal withheld here too, for
@@ -340,6 +349,20 @@ the Admin UI for context.
   audited as `closed_by_plate_deduction`. No match (including more than
   one equally-plausible candidate, or a failed weight capture) falls
   through to the ordinary `ANOMALY` path, unchanged. See §11.
+- **Exit reading discarded when no ticket can be resolved (2026-11-23):** a
+  deliberate, narrow tightening of the "exit with no `OPEN` ticket is
+  always `ANOMALY`, never guessed" rule, requested by the user: when an
+  exit reading finds no exact-plate `OPEN` ticket, no re-weigh candidate,
+  and no plate-misread deduction candidate — i.e. there is nothing at all
+  this reading could resolve to — the scale is never even read for it. The
+  reading is discarded outright (logged to `raw_events` only, the same
+  `discarded` pattern as the post-release/duplicate-plate/preemption
+  discards) instead of capturing a weight that would only ever become a
+  dangling `ANOMALY` ticket. The `ANOMALY` outcome itself is **not**
+  removed from the system — it stays reachable for every other case that
+  already produces one, chiefly: a re-weigh or deduction candidate *was*
+  found (so the capture was attempted), but the capture itself then
+  failed. See §11.
 - **Print** happens automatically exactly once per ticket transition into
   `CLOSED`, tracked via `printed_at` to avoid duplicate prints from retries;
   Admin UI can force a reprint explicitly.
@@ -1849,3 +1872,59 @@ merge per `CLAUDE.md`):
   check removed above. No other behavior changed.
 - See `docs/plans/2026-11-18-remove-plate-length-check-plan.md`; delete
   it once this entry is merged.
+
+### Exit reading discarded when no ticket can be resolved (2026-11-23)
+
+- **Decision (requested by the user, clarified via follow-up questions)**:
+  previously, every exit camera reading triggered a scale weight capture
+  first, and only afterward did `handleExitReading` decide whether it
+  resolved to an exact `OPEN` ticket, a re-weigh correction, a
+  plate-misread deduction close, or (if none of those applied) an
+  `ANOMALY` ticket. Now, before the scale is ever read, `camera/routes.ts`
+  asks a new `SessionService.hasResolvableExitCandidate(rawPlate,
+  readQuality, now)` whether *any* of those four outcomes (exact match,
+  active internal-truck tare, re-weigh candidate, deduction candidate)
+  could possibly apply. If none can, the reading is discarded immediately:
+  logged to `raw_events` as `discarded: 'no_matching_ticket_for_exit'`
+  (same pattern as `'post_release_debounce'`/`'duplicate_plate_read'`/
+  `'preempted_by_new_plate'`), replying `{ kind: 'reading_no_matching_ticket' }`
+  — no scale capture, no driver signal, no ticket of any kind, no
+  `weighing-plate-received`/`weighing-result` SSE narration.
+- **Order preserved**: re-weigh correction and plate-misread deduction
+  still run with the same priority as before, inside `handleExitReading`,
+  unchanged. The new check is purely an additional *earlier* gate that
+  mirrors their own existence check (without needing a captured weight —
+  none of the four checks do) to decide whether it's worth weighing the
+  truck at all. It does not change which of exact/re-weigh/deduction wins
+  when more than one would apply.
+- **`ANOMALY` is not removed from the system**: it stays reachable for
+  every case that already produced one and still can, by construction —
+  mainly, the gate found a re-weigh or deduction *candidate* (so capture
+  was attempted), but the scale capture itself then failed, which already
+  disqualifies both of those branches inside `handleExitReading`
+  (`input.weightCaptureFailed ? undefined : ...`), falling through to
+  `flagAnomaly` exactly as before. The `ANOMALY` ticket status, its Admin
+  UI screens, and its filters are all untouched.
+- **Ambiguous deduction match unaffected**: `findPlateDeductionMatch`
+  already returned `undefined` for both "no candidate" and "more than one
+  equally-plausible candidate" — the new gate reuses that same function
+  and inherits the same behavior; no new distinction was introduced.
+- **"Valid plate" scope**: this only applies to a plate that already
+  passed `isReliablePlateRead` (`event.rawPlate !== ''` in the normalized
+  camera event). An unreliable/unreadable plate is unaffected — it keeps
+  going through the existing `plate_unreadable` path, unchanged.
+- **Where it lives**: `tickets/session-service.ts` exposes
+  `hasResolvableExitCandidate` on `SessionService`, implemented in the
+  same closure as `handleExitReading` (same `repo`/`truckRepo`/
+  `ticketConfig`, so it can't drift from the real decision tree it
+  mirrors). `camera/routes.ts` gains `checkNoResolvableExitCandidate`,
+  wired into the exit webhook handler right after the existing
+  post-release/duplicate-plate debounce checks and before the scale
+  capture call — no new constructor options or wiring needed, since
+  `sessionService` was already available there.
+- **Explicitly out of scope**: entrance readings (unaffected — the
+  entrance rule is already "always open a new ticket", no equivalent dead
+  end exists); any retroactive handling of tickets already in `ANOMALY`
+  status today.
+- See `docs/plans/2026-11-23-exit-no-ticket-discard-plan.md`; delete it
+  once this entry is merged.
