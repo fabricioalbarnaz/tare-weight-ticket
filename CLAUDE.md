@@ -263,10 +263,8 @@ weight (printed/signaled like a normal close, audited as
 qualifying candidate) still falls through to the ordinary `ANOMALY` path,
 unchanged. The two already-stuck tickets that motivated this (#744, #598)
 are outside this feature's scope (both past any reasonable 24h window)
-and still need manual Admin UI correction. Implemented and verified this
-session (not yet redeployed to the production install — see master plan
-§11 for the full write-up); needs the user's own redeploy procedure
-(online backup + image rollback tag) before it's live.
+and still need manual Admin UI correction. See master plan §11 for the
+full write-up.
 
 **Plate-reliability length check removed (2026-11-18):** at the user's
 explicit request, `isReliablePlateRead` (`camera/normalize.ts`) no longer
@@ -281,8 +279,19 @@ tolerates non-7-character plates by simply never matching them). See
 master plan §11. **Same-day follow-up:** `MIN_CONFIDENCE_LEVEL` itself was
 then lowered from 80 to **70**, also at the user's explicit request — a
 further loosening of the same gate, independent of the length-check
-removal. Implemented and verified this session (not yet redeployed to
-the production install).
+removal.
+
+**Redeploy (2026-11-18):** the plate-misread deduction close and the two
+plate-reliability loosening commits above (no schema change,
+business-logic only) were deployed to this production install. Verified
+via the Alpine container (`lint`/`typecheck`/`build` clean; `test`
+407/407 core-service + 15/15 print-bridge + 11/11 scale-bridge, no flake
+this run). Live `tare.sqlite` backed up online (`better-sqlite3`
+`.backup()`) to
+`data/backup-before-rebuild-20261118/tare.online-backup.sqlite` and the
+prior image tagged `docker-core-service:rollback-20261118` before
+rebuilding. Post-deploy: container healthy, ticket count unchanged
+(825 / last id 830), no errors in startup logs.
 
 **Exit reading discarded when no ticket can be resolved (2026-11-23):** at
 the user's explicit request, an exit camera reading for a plate with no
