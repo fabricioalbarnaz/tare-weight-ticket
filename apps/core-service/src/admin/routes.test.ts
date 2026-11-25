@@ -208,8 +208,9 @@ describe('GET /api/admin/tickets', () => {
     repo.appendAuditLog(deduced.id, 'system', 'closed_by_plate_deduction', {
       misreadPlate: 'DEDU9001',
       diffIndex: 3,
-      diffCharConfidence: 60,
-      otherCharsMinConfidence: 99,
+      matchedBy: 'confidence',
+      entryCharConfidence: 99,
+      exitCharConfidence: 60,
     });
     createOpenTicket('NORMAL02');
 
@@ -229,8 +230,9 @@ describe('GET /api/admin/tickets', () => {
       tareWeightKg: 9000,
       misreadPlate: 'TDED9001',
       diffIndex: 3,
-      diffCharConfidence: 60,
-      otherCharsMinConfidence: 99,
+      matchedBy: 'confidence',
+      entryCharConfidence: 100,
+      exitCharConfidence: 60,
     });
     createOpenTicket('NORMAL03');
 

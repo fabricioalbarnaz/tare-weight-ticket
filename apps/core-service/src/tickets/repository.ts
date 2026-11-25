@@ -63,6 +63,13 @@ export interface CreateTicketInput {
   createdByAdmin?: boolean;
   /** Set when this ticket is a re-weigh correction reusing another CLOSED ticket's entry — see master plan §5/§11 "Exit re-weigh". */
   reweighOfTicketId?: number | null;
+  /**
+   * The entrance camera read's own confidence, stored so a later exit
+   * reading's plate-misread deduction can compare both sides — see
+   * docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md.
+   */
+  entryConfidenceLevel?: number | null;
+  entryPlateCharBelieve?: number[] | null;
 }
 
 export interface UpdateEntryInput {
@@ -77,6 +84,14 @@ export interface CloseTicketInput {
   exitWeightKg: number | null;
   exitCameraId: string | null;
   exitCaptureFailed: boolean;
+  /**
+   * Overrides the ticket's stored plate when provided — used by the
+   * plate-misread deduction close when the entrance turns out to be the
+   * side that misread, not the exit (master plan §5/§11, see
+   * docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md). Omitted
+   * (or undefined) by every other caller, leaving the plate unchanged.
+   */
+  plate?: string;
 }
 
 export interface FlagAnomalyInput {
@@ -420,6 +435,8 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
           entryCaptureFailed: input.entryCaptureFailed,
           createdByAdmin: input.createdByAdmin ?? false,
           reweighOfTicketId: input.reweighOfTicketId ?? null,
+          entryConfidenceLevel: input.entryConfidenceLevel ?? null,
+          entryPlateCharBelieve: input.entryPlateCharBelieve ? JSON.stringify(input.entryPlateCharBelieve) : null,
           createdAt: now,
           updatedAt: now,
         })
@@ -461,6 +478,7 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
         .update(tickets)
         .set({
           status: 'CLOSED',
+          plate: input.plate ?? current.plate,
           exitAt: input.exitAt,
           exitWeightKg: input.exitWeightKg,
           exitCameraId: input.exitCameraId,

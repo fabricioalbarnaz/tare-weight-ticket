@@ -118,6 +118,7 @@
     "reweighOf": "Repesagem do ticket #{{number}}",
     "reweighedBy": "Substituído pelo ticket de repesagem #{{number}}",
     "closedByDeduction": "Fechado automaticamente por dedução de placa — a câmera de saída leu \"{{misreadPlate}}\", um caractere diferente da placa deste ticket. Confira.",
+    "closedByDeductionPlateCorrected": "A placa de entrada foi corrigida de \"{{correctedFromPlate}}\" para \"{{correctedToPlate}}\" — a leitura de saída teve mais confiança no caractere divergente (ou bateu com um padrão de placa reconhecido) do que a leitura de entrada original.",
     "closedViaTareByDeduction": "Resolvido via a tara deste caminhão interno — a câmera leu \"{{misreadPlate}}\", um caractere diferente da placa cadastrada. Confira.",
     "auditTrail": "Trilha de auditoria"
   },

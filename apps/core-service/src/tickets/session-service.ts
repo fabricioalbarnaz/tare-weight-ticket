@@ -3,8 +3,33 @@ import type { ScaleReadFailureReason } from '../scale/types.js';
 import type { CameraReadQuality } from '../camera/normalize.js';
 import type { ActiveTare, TruckRepository } from '../trucks/repository.js';
 import type { TicketConfig } from './config.js';
-import { findPlateDeductionMatch } from './plate-deduction.js';
+import { findPlateDeductionMatch, type PlateDeductionCandidate } from './plate-deduction.js';
 import type { Ticket, TicketRepository } from './repository.js';
+
+/**
+ * Pairs every item with a synthetic all-100 `ownCharConfidence` — used for
+ * sources that should be treated as ground truth (a registered truck
+ * plate is never itself "misread", only the camera reading can be) — see
+ * docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md.
+ */
+function withGroundTruthConfidence<T extends { plate: string }>(items: T[]): (T & PlateDeductionCandidate)[] {
+  return items.map((item) => ({ ...item, ownCharConfidence: Array(item.plate.length).fill(100) }));
+}
+
+/**
+ * Pairs every OPEN ticket with its stored entrance confidence (parsed),
+ * or `undefined` when it has none — a ticket created before this feature,
+ * or by an admin with no camera reading at all. `undefined` triggers the
+ * single-sided fallback inside `findPlateDeductionMatch`.
+ */
+function withStoredEntryConfidence(tickets: Ticket[]): (Ticket & PlateDeductionCandidate)[] {
+  return tickets.map((ticket) => ({
+    ...ticket,
+    ownCharConfidence: ticket.entryPlateCharBelieve
+      ? (JSON.parse(ticket.entryPlateCharBelieve) as number[])
+      : undefined,
+  }));
+}
 
 export const TICKET_AUDIT_ACTIONS = {
   ENTRY_CAPTURED: 'entry_captured',
@@ -149,8 +174,9 @@ function cameraRawPayload(
 interface ActiveTareDeduction {
   misreadPlate: string;
   diffIndex: number;
-  diffCharConfidence: number;
-  otherCharsMinConfidence: number;
+  matchedBy: 'format' | 'confidence' | 'fallback';
+  entryCharConfidence: number | null;
+  exitCharConfidence: number;
 }
 
 interface ResolvedActiveTare {
@@ -185,17 +211,21 @@ export function createSessionService(
     const exact = truckRepo.findActiveTareByPlate(plate);
     if (exact) return { tare: exact, plate };
 
-    const match = findPlateDeductionMatch(truckRepo.listActiveTares(), plate, readQuality);
+    const match = findPlateDeductionMatch(withGroundTruthConfidence(truckRepo.listActiveTares()), plate, readQuality);
     if (!match) return undefined;
 
+    // The registered plate is ground truth regardless of `match.winner` —
+    // truck master data is never auto-corrected by this match (see
+    // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md, Scope).
     return {
       tare: match.candidate,
       plate: match.candidate.plate,
       deduction: {
         misreadPlate: plate,
         diffIndex: match.diffIndex,
-        diffCharConfidence: match.diffCharConfidence,
-        otherCharsMinConfidence: match.otherCharsMinConfidence,
+        matchedBy: match.matchedBy,
+        entryCharConfidence: match.entryCharConfidence,
+        exitCharConfidence: match.exitCharConfidence,
       },
     };
   }
@@ -205,7 +235,9 @@ export function createSessionService(
       const plate = normalizePlate(rawPlate);
       if (plate === '') return true;
 
-      if (resolveActiveTare(plate, readQuality)) return true;
+      // Mirrors handleExitReading's cascade below: exact tare, exact
+      // ticket, re-weigh, then both deductions (tare, then ticket).
+      if (truckRepo.findActiveTareByPlate(plate)) return true;
       if (repo.findOpenByPlate(plate)) return true;
 
       const reweighCandidate = repo.findMostRecentClosedTicketByPlate(plate);
@@ -216,8 +248,17 @@ export function createSessionService(
         return true;
       }
 
+      const tareDeductionMatch = findPlateDeductionMatch(
+        withGroundTruthConfidence(truckRepo.listActiveTares()),
+        plate,
+        readQuality,
+      );
+      if (tareDeductionMatch) return true;
+
       const deductionMatch = findPlateDeductionMatch(
-        repo.findOpenTicketsEnteredAfter(new Date(now.getTime() - ticketConfig.plateDeductionWindowMs)),
+        withStoredEntryConfidence(
+          repo.findOpenTicketsEnteredAfter(new Date(now.getTime() - ticketConfig.plateDeductionWindowMs)),
+        ),
         plate,
         readQuality,
       );
@@ -301,6 +342,8 @@ export function createSessionService(
           entryWeightKg: input.weightKg,
           entryCameraId: input.cameraId,
           entryCaptureFailed: input.weightCaptureFailed,
+          entryConfidenceLevel: input.readQuality?.confidenceLevel ?? null,
+          entryPlateCharBelieve: input.readQuality?.plateCharBelieve ?? null,
         });
 
         repo.appendAuditLog(ticket.id, 'system', action, {
@@ -337,13 +380,23 @@ export function createSessionService(
         return { kind: 'plate_unreadable' };
       }
 
-      const resolvedTare = resolveActiveTare(plate, input.readQuality);
-      if (resolvedTare) {
+      // Exact tare match takes priority over everything else — resolved
+      // outside the main transaction below, same as today. Resolution
+      // order (changed 2026-11-24, see
+      // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md):
+      // exact tare, exact OPEN ticket, re-weigh, tare-deduction,
+      // OPEN-ticket-deduction, ANOMALY. Both exact checks must fail
+      // before either deduction (now far more permissive — a registered
+      // plate is treated as 100% confidence) is attempted, so a loose
+      // tare-deduction match can never steal a reading that has an exact,
+      // certain match elsewhere.
+      const exactTare = truckRepo.findActiveTareByPlate(plate);
+      if (exactTare) {
         return repo.transaction((): ExitResult => {
           const opened = repo.create({
-            plate: resolvedTare.plate,
+            plate,
             entryAt: input.weighingFinishedAt,
-            entryWeightKg: resolvedTare.tare.tareWeightKg,
+            entryWeightKg: exactTare.tareWeightKg,
             entryCameraId: null,
             entryCaptureFailed: false,
           });
@@ -354,16 +407,10 @@ export function createSessionService(
             exitCaptureFailed: input.weightCaptureFailed,
           });
 
-          repo.appendAuditLog(
-            ticket.id,
-            'system',
-            resolvedTare.deduction ? TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE_BY_DEDUCTION : TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE,
-            {
-              truckConjuntoId: resolvedTare.tare.truckConjuntoId,
-              tareWeightKg: resolvedTare.tare.tareWeightKg,
-              ...resolvedTare.deduction,
-            },
-          );
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE, {
+            truckConjuntoId: exactTare.truckConjuntoId,
+            tareWeightKg: exactTare.tareWeightKg,
+          });
           repo.appendAuditLog(
             ticket.id,
             'system',
@@ -389,9 +436,7 @@ export function createSessionService(
             ticket.id,
           );
 
-          return resolvedTare.deduction
-            ? { kind: 'ticket_closed_via_tare_by_deduction', ticket, misreadPlate: resolvedTare.deduction.misreadPlate }
-            : { kind: 'ticket_closed', ticket };
+          return { kind: 'ticket_closed', ticket };
         });
       }
 
@@ -510,18 +555,81 @@ export function createSessionService(
           return { kind: 'ticket_reweighed', ticket, originalTicketId: reweighCandidate.id };
         }
 
-        // Plate-misread deduction close (master plan §5/§11): still no
-        // exact-plate match and no re-weigh candidate. A failed capture
-        // never qualifies (nothing new to attribute), same precedent as
-        // the re-weigh branch above. Otherwise, check OPEN tickets opened
-        // within the configured window for a single-character-different
-        // plate whose per-character ANPR confidence confirms the misread —
-        // see docs/plans/2026-11-18-plate-misread-deduction-plan.md.
+        // Tare-plate-deduction (master plan §5/§11, moved here 2026-11-24
+        // so both exact checks and re-weigh always take priority — see
+        // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md):
+        // still no exact match for anything. A failed capture never
+        // qualifies, same precedent as every branch below. The registered
+        // plate is ground truth (`withGroundTruthConfidence`), so the
+        // match's `winner`/`correctedPlate` are ignored — `tare.plate` is
+        // always what's used, never auto-corrected.
+        const tareDeductionMatch = input.weightCaptureFailed
+          ? undefined
+          : findPlateDeductionMatch(withGroundTruthConfidence(truckRepo.listActiveTares()), plate, input.readQuality);
+
+        if (tareDeductionMatch) {
+          const tare = tareDeductionMatch.candidate;
+          const opened = repo.create({
+            plate: tare.plate,
+            entryAt: input.weighingFinishedAt,
+            entryWeightKg: tare.tareWeightKg,
+            entryCameraId: null,
+            entryCaptureFailed: false,
+          });
+          const ticket = repo.close(opened.id, {
+            exitAt: input.weighingFinishedAt,
+            exitWeightKg: input.weightKg,
+            exitCameraId: input.cameraId,
+            exitCaptureFailed: false,
+          });
+
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.ENTRY_VIA_TARE_BY_DEDUCTION, {
+            truckConjuntoId: tare.truckConjuntoId,
+            tareWeightKg: tare.tareWeightKg,
+            misreadPlate: plate,
+            diffIndex: tareDeductionMatch.diffIndex,
+            matchedBy: tareDeductionMatch.matchedBy,
+            entryCharConfidence: tareDeductionMatch.entryCharConfidence,
+            exitCharConfidence: tareDeductionMatch.exitCharConfidence,
+          });
+          repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.EXIT_CAPTURED, {
+            weightKg: input.weightKg,
+            cameraId: input.cameraId,
+            attemptsUsed: input.attemptsUsed,
+          });
+          repo.recordRawEvent('camera_exit', cameraRawPayload(input, plate), ticket.id);
+          repo.recordRawEvent(
+            'scale',
+            {
+              direction: 'exit',
+              weightKg: input.weightKg,
+              weightCaptureFailed: false,
+              failureReason: input.failureReason,
+              waitedMs: input.waitedMs,
+            },
+            ticket.id,
+          );
+
+          return { kind: 'ticket_closed_via_tare_by_deduction', ticket, misreadPlate: plate };
+        }
+
+        // OPEN-ticket plate-misread deduction close (master plan §5/§11):
+        // still no match for anything above. A failed capture never
+        // qualifies (nothing new to attribute), same precedent as the
+        // branches above. Otherwise, check OPEN tickets opened within the
+        // configured window for a single-character-different plate —
+        // either side's own confidence (or plate format) can be the
+        // misread one now, see
+        // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md
+        // (supersedes the original single-sided
+        // docs/plans/2026-11-18-plate-misread-deduction-plan.md rule).
         const deductionMatch = input.weightCaptureFailed
           ? undefined
           : findPlateDeductionMatch(
-              repo.findOpenTicketsEnteredAfter(
-                new Date(input.weighingFinishedAt.getTime() - ticketConfig.plateDeductionWindowMs),
+              withStoredEntryConfidence(
+                repo.findOpenTicketsEnteredAfter(
+                  new Date(input.weighingFinishedAt.getTime() - ticketConfig.plateDeductionWindowMs),
+                ),
               ),
               plate,
               input.readQuality,
@@ -533,16 +641,21 @@ export function createSessionService(
             exitWeightKg: input.weightKg,
             exitCameraId: input.cameraId,
             exitCaptureFailed: false,
+            plate: deductionMatch.correctedPlate ?? undefined,
           });
 
           repo.appendAuditLog(ticket.id, 'system', TICKET_AUDIT_ACTIONS.CLOSED_BY_PLATE_DEDUCTION, {
             misreadPlate: plate,
             diffIndex: deductionMatch.diffIndex,
-            diffCharConfidence: deductionMatch.diffCharConfidence,
-            otherCharsMinConfidence: deductionMatch.otherCharsMinConfidence,
+            matchedBy: deductionMatch.matchedBy,
+            entryCharConfidence: deductionMatch.entryCharConfidence,
+            exitCharConfidence: deductionMatch.exitCharConfidence,
             weightKg: input.weightKg,
             cameraId: input.cameraId,
             attemptsUsed: input.attemptsUsed,
+            ...(deductionMatch.winner === 'exit'
+              ? { correctedFromPlate: deductionMatch.candidate.plate, correctedToPlate: deductionMatch.correctedPlate }
+              : {}),
           });
           repo.recordRawEvent('camera_exit', cameraRawPayload(input, plate), ticket.id);
           repo.recordRawEvent(

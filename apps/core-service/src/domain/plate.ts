@@ -24,3 +24,23 @@ export function findSingleCharDifferenceIndex(a: string, b: string): number | nu
   }
   return diffIndex;
 }
+
+/**
+ * Recognized plate formats (confirmed with the user, 2026-11-24): Brazil
+ * old (LLLNNNN), Brazil Mercosul (LLLNLNN), Argentina old (LLLNNN),
+ * Argentina Mercosul (LLNNNLL), Uruguay (LLLNNNN). Used only as a
+ * disambiguation signal for plate-misread deduction — see
+ * docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md. Never used
+ * to reject a camera read outright; `isReliablePlateRead`
+ * (camera/normalize.ts) deliberately doesn't gate on shape.
+ */
+const PLATE_FORMATS: RegExp[] = [
+  /^[A-Z]{3}[0-9]{4}$/, // Brazil old / Uruguay
+  /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/, // Brazil Mercosul
+  /^[A-Z]{3}[0-9]{3}$/, // Argentina old
+  /^[A-Z]{2}[0-9]{3}[A-Z]{2}$/, // Argentina Mercosul
+];
+
+export function isValidPlateFormat(plate: string): boolean {
+  return PLATE_FORMATS.some((format) => format.test(plate));
+}

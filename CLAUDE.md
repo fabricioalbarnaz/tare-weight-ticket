@@ -359,6 +359,39 @@ prior image tagged `docker-core-service:rollback-20261123` before
 rebuilding. Post-deploy: container healthy, ticket count unchanged
 (949 / last id 954), no errors in startup logs.
 
+**Plate-misread deduction: either side can be the misread one, plus
+plate-format validation (2026-11-24).** Fixes a gap found in production
+(ticket #965): the 2026-11-18 deduction only ever suspected the *exit*
+reading of being the misread one (checking whether its own differing
+character was an outlier within that same reading); here the *entrance*
+was the misread side (`RL13H28` instead of the real `RLI3H28`) and the
+exit read correctly with high confidence, so no match was found and the
+reading was discarded. Now `findPlateDeductionMatch`
+(`tickets/plate-deduction.ts`) is one shared matcher for both the
+`OPEN`-ticket and internal-truck-tare deduction paths: a recognized plate
+format (Brazil old/Mercosul, Argentina old/Mercosul, Uruguay — new
+`domain/plate.ts` helper `isValidPlateFormat`) decides first when exactly
+one side matches one; otherwise per-character confidence at the differing
+position decides, comparing **both** the entrance's stored confidence
+(new `tickets.entryConfidenceLevel`/`entryPlateCharBelieve` columns,
+migration `0004_tidy_ares.sql`) and the exit's incoming confidence — no
+minimum margin, and an exact tie keeps the ticket's original plate rather
+than discarding the reading. When the entrance turns out to be the wrong
+side, the ticket's `plate` is corrected (`TicketRepository.close` gained
+an optional `plate` override) before its one-time print. Internal-truck
+tare-deduction now treats the registered plate as 100%-confidence ground
+truth, dropping its own copy of the old single-sided threshold; this also
+required reordering `handleExitReading` so both exact matches (tare, then
+`OPEN` ticket) are checked before either deduction is attempted, so the
+now-more-permissive tare-deduction can't steal a reading that already has
+a certain, exact match. Verified via the Alpine container
+(`lint`/`typecheck`/`build` clean; `test` 450/452 core-service, the 2
+failures being the already-documented pre-existing cold-start `/health`
+and `weighing-stream` flakes; admin-ui `typecheck` clean, 50/50 passing —
+one unrelated worker-startup flake on `LoginPage.test.tsx` in that same
+container run). See `docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md`
+and master plan §5/§11. **Not yet deployed to any production install.**
+
 `npm run lint`, `npm run typecheck`, `npm run test`, and `npm run build` all
 passed from the repo root as of the last phases merged; re-verify rather
 than trusting this note once new work lands.

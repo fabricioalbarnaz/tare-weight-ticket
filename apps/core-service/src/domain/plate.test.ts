@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findSingleCharDifferenceIndex, normalizePlate } from './plate.js';
+import { findSingleCharDifferenceIndex, isValidPlateFormat, normalizePlate } from './plate.js';
 
 describe('normalizePlate', () => {
   it('uppercases and strips surrounding whitespace', () => {
@@ -37,5 +37,37 @@ describe('findSingleCharDifferenceIndex', () => {
   it('returns null for different-length strings', () => {
     expect(findSingleCharDifferenceIndex('RKZ6F83', 'RKZ6F8')).toBeNull();
     expect(findSingleCharDifferenceIndex('RKZ6F83', 'RKZ6F831')).toBeNull();
+  });
+});
+
+describe('isValidPlateFormat', () => {
+  it('accepts the Brazil old format (LLLNNNN)', () => {
+    expect(isValidPlateFormat('ABC1234')).toBe(true);
+  });
+
+  it('accepts the Brazil Mercosul format (LLLNLNN)', () => {
+    expect(isValidPlateFormat('RLI3H28')).toBe(true);
+  });
+
+  it('accepts the Argentina old format (LLLNNN)', () => {
+    expect(isValidPlateFormat('ABC123')).toBe(true);
+  });
+
+  it('accepts the Argentina Mercosul format (LLNNNLL)', () => {
+    expect(isValidPlateFormat('AB123CD')).toBe(true);
+  });
+
+  it('accepts the Uruguay format (LLLNNNN, same shape as Brazil old)', () => {
+    expect(isValidPlateFormat('UAY1234')).toBe(true);
+  });
+
+  it('rejects the real misread from the 2026-11-24 incident (digit where Mercosul expects a letter)', () => {
+    expect(isValidPlateFormat('RL13H28')).toBe(false);
+  });
+
+  it('rejects shapes that match none of the recognized formats', () => {
+    expect(isValidPlateFormat('1234ABC')).toBe(false);
+    expect(isValidPlateFormat('AB')).toBe(false);
+    expect(isValidPlateFormat('')).toBe(false);
   });
 });

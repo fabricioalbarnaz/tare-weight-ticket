@@ -46,7 +46,16 @@ export function TicketDetailPage() {
   // the audit log rather than a ticket field, since the full log is
   // already fetched for this page.
   const deductionEntry = auditLog.find((entry) => entry.action === 'closed_by_plate_deduction');
-  const misreadPlate = (deductionEntry?.payload as { misreadPlate?: string } | null)?.misreadPlate ?? '';
+  const deductionPayload = deductionEntry?.payload as
+    | { misreadPlate?: string; correctedFromPlate?: string; correctedToPlate?: string }
+    | null;
+  const misreadPlate = deductionPayload?.misreadPlate ?? '';
+  // Bidirectional plate-misread deduction (master plan §5/§11,
+  // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md): only set
+  // when the entrance turned out to be the misread side, so the ticket's
+  // plate was corrected to the exit reading instead of the usual "exit
+  // was wrong" case.
+  const plateCorrected = deductionPayload?.correctedFromPlate != null && deductionPayload?.correctedToPlate != null;
 
   // Plate-misread deduction for internal trucks (master plan §5/§11,
   // docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md): same
@@ -103,6 +112,14 @@ export function TicketDetailPage() {
           {deductionEntry && (
             <p className="mt-1 text-sm text-amber-700">
               {t('ticketDetail.closedByDeduction', { misreadPlate })}
+            </p>
+          )}
+          {plateCorrected && (
+            <p className="mt-1 text-sm text-amber-700">
+              {t('ticketDetail.closedByDeductionPlateCorrected', {
+                correctedFromPlate: deductionPayload!.correctedFromPlate,
+                correctedToPlate: deductionPayload!.correctedToPlate,
+              })}
             </p>
           )}
           {tareDeductionEntry && (

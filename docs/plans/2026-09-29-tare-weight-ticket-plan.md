@@ -237,23 +237,32 @@ the Admin UI for context.
   rollback bounce). An unreadable plate never debounces and is never
   debounced against. See §11 for the full rationale.
 - **Exit camera fires** for plate `X`:
-  - Before any of the below: same internal-truck active-tare check as the
-    entrance side above (exact match, then plate-misread deduction) — see
-    §11 "internal trucks" and "Plate-misread deduction for internal
-    trucks".
+  - Exact internal-truck active-tare match for `X` → close via the tare
+    immediately. **Updated 2026-11-24:** this exact check, and the exact
+    `OPEN`-ticket check below, both now run *before* either deduction
+    (tare-deduction or `OPEN`-ticket-deduction) is attempted — see §11
+    "Plate-misread deduction: either side can be the misread one".
   - Open ticket exists for `X` → capture exit weight (stable read), close
     ticket (`CLOSED`), compute net weight, trigger driver signal, enqueue
     print job. **Updated 2026-11-14:** since more than one `OPEN` ticket can
     now exist for the same plate (see the entrance rule above), "the open
     ticket" means the **most recently opened** one; any earlier `OPEN`
     ticket for `X` is left untouched and stays `OPEN`.
-  - No open ticket for `X`, but a same-length `OPEN` ticket within
+  - No exact match for anything above, but `X` is a single-character
+    misread of some truck currently holding an active tare (confidence or
+    plate-format confirmed — see §11 "internal trucks" and "Plate-misread
+    deduction for internal trucks") → close via that tare, same as an
+    exact tare match.
+  - Still no match, but a same-length `OPEN` ticket within
     `PLATE_DEDUCTION_WINDOW_MS` (default 24h) differs from `X` by exactly
-    one character, and that character's ANPR `plateCharBelieve` confidence
-    confirms the misread (**2026-11-18**, see below) → close **that**
-    ticket with this exit's weight instead, exactly like a normal exit
-    close (print, signal driver), flagged `closed_by_plate_deduction`
-    instead of leaving an `ANOMALY` behind.
+    one character, and either side's confidence at that position, or a
+    recognized plate format, confirms which side misread (**2026-11-18,
+    extended 2026-11-24** — see §11) → close **that** ticket with this
+    exit's weight, exactly like a normal exit close (print, signal
+    driver), flagged `closed_by_plate_deduction`. **2026-11-24:** when the
+    *entrance* turns out to be the misread side, the ticket's own `plate`
+    is corrected to this exit's reading instead of staying as originally
+    captured.
   - Otherwise — no open ticket, no re-weigh candidate, and no deduction
     candidate for `X` (**2026-11-23**, see below) → the reading is
     discarded *before the scale is ever read*: logged to `raw_events` as
@@ -357,7 +366,12 @@ the Admin UI for context.
   with this exit's weight, printed and signaled like a normal close,
   audited as `closed_by_plate_deduction`. No match (including more than
   one equally-plausible candidate, or a failed weight capture) falls
-  through to the ordinary `ANOMALY` path, unchanged. See §11.
+  through to the ordinary `ANOMALY` path, unchanged. **Extended
+  2026-11-24:** the misread side can now be *either* the exit reading or
+  the original entrance reading — a recognized plate format, then
+  per-character confidence, decide which; when the entrance turns out to
+  be the wrong one, the ticket's own `plate` is corrected. See §11
+  "Plate-misread deduction: either side can be the misread one".
 - **Exit reading discarded when no ticket can be resolved (2026-11-23):** a
   deliberate, narrow tightening of the "exit with no `OPEN` ticket is
   always `ANOMALY`, never guessed" rule, requested by the user: when an
@@ -1999,4 +2013,94 @@ merge per `CLAUDE.md`):
   `OPEN`-ticket cases, not internal trucks); no retroactive reconciliation
   job was built here either.
 - See `docs/plans/2026-11-23-internal-truck-plate-deduction-plan.md`;
+  delete it once this entry is merged.
+
+### Plate-misread deduction: either side can be the misread one, plate-format validation, registered plates as ground truth (2026-11-24)
+
+- **Incident**: ticket #965 — the entrance camera misread the plate as
+  `RL13H28` (confidence 86%, per-char `99-98-91-98-90-90-77`); 34 minutes
+  later the exit camera read it correctly as `RLI3H28` (confidence 97%,
+  per-char `99-99-97-99-99-99-97`), confirmed by this truck's
+  entrance/exit history on every other day. The existing "Plate-misread
+  deduction close" (2026-11-18) only ever asked whether the **incoming**
+  reading's divergent character was a clear outlier *within that same
+  reading* — it never looked at the entrance's own stored confidence, so
+  it only ever caught the case where the *exit* was the misread side. Here
+  the exit was correct and the entrance was wrong, so no match was found
+  and the reading was discarded (`no_matching_ticket_for_exit`).
+  Re-running the *same* single-sided outlier rule against the entrance's
+  own data would not have caught this either — the entrance's weakest
+  character was a different position (77%, the last digit) than the
+  actually-misread one (91%, not an outlier within its own reading).
+- **Decision (requested by the user, confirmed via follow-up questions)**:
+  `findPlateDeductionMatch` (`tickets/plate-deduction.ts`) is now one
+  shared matcher, generic over any candidate carrying a `plate` and an
+  optional `ownCharConfidence: number[]`, with this priority per
+  candidate:
+  1. **Plate format first**: a new `domain/plate.ts` helper,
+     `isValidPlateFormat`, recognizes 5 formats — Brazil old (`LLLNNNN`),
+     Brazil Mercosul (`LLLNLNN`), Argentina old (`LLLNNN`), Argentina
+     Mercosul (`LLNNNLL`), Uruguay (`LLLNNNN`). If exactly one of the two
+     plate strings being compared matches a recognized format, that one
+     wins outright, **regardless of confidence**. (`RL13H28` matches
+     none of the 5; `RLI3H28` matches Mercosul — in this real incident,
+     format alone would have resolved it.)
+  2. **Confidence, when format doesn't disambiguate** (both sides valid,
+     or both invalid): compare `plateCharBelieve` at the one differing
+     position between the candidate's own stored confidence and the
+     incoming reading's — **no minimum margin**, whichever is higher wins
+     outright, even by a single point.
+  3. **Exact tie** at that position: keep the candidate's (already-known)
+     plate, no correction — but still a qualifying match, not a bare
+     "no match". A bare no-match on tie would reproduce the exact failure
+     this feature exists to prevent: when deduction is the *only* path
+     that could resolve an exit reading, "no match" means
+     `hasResolvableExitCandidate` discards the reading entirely *before
+     the scale is even read* (2026-11-23 feature above) — stranding the
+     truck with no weight, no signal, nothing. Keeping the known plate on
+     a tie at least resolves the weighing; it just doesn't guess which
+     side was "right" when there's no basis to.
+  4. **No stored confidence on the candidate at all** (an `OPEN` ticket
+     predating this change, or created manually by an admin with no
+     camera reading): falls back to the original 2026-11-18 single-sided
+     rule unchanged (`<95%` and `>=15pp` gap within the *incoming*
+     reading only).
+- **Registered truck plates are ground truth**: the internal-truck
+  tare-deduction call site now supplies a synthetic all-100
+  `ownCharConfidence` for every candidate, instead of the old single-sided
+  95%/15pp-gap check — a registered plate always wins (rules 2-3 above
+  still apply, so a reading can only "beat" it via a format mismatch on
+  the registered plate itself, or tie it at 100%). The match's
+  `winner`/`correctedPlate` are computed the same way for this path too,
+  but the tare caller **always ignores them** and uses the registered
+  plate regardless — truck master data is never auto-corrected by this
+  match, only looked up.
+- **Ticket plate correction**: when the `OPEN`-ticket caller's match
+  concludes the *entrance* was the misread side, `TicketRepository.close`
+  (gained an optional `plate` override) is called with the corrected
+  plate, so the ticket's stored `plate` — and the printed ticket, since
+  this happens before the single close-time print — reflects the
+  corrected value from then on. The `CLOSED_BY_PLATE_DEDUCTION` audit
+  payload gains `matchedBy` ('format' | 'confidence' | 'fallback') always,
+  and `correctedFromPlate`/`correctedToPlate` only on this specific
+  sub-case. `tickets.entryConfidenceLevel`/`entryPlateCharBelieve` (new
+  columns, migration `0004_tidy_ares.sql`) store the entrance reading's
+  own confidence at creation time, so there's something to compare
+  against later — the only way the "which side misread" question can be
+  answered at all.
+- **Resolution order fix**: because tare-deduction is now far more
+  permissive (any single-character difference qualifies, not just a
+  confidence outlier), it could otherwise steal an exit reading that
+  actually has an exact, certain `OPEN`-ticket match. `handleExitReading`
+  now checks exact tare match, then exact `OPEN`-ticket match, then the
+  re-weigh candidate, **before** attempting either deduction (tare, then
+  `OPEN`-ticket) — previously, tare resolution (exact and deduction
+  together) ran before the exact-ticket check at all.
+  `hasResolvableExitCandidate` mirrors the same new order.
+- **Explicitly out of scope**: no retroactive reconciliation for readings
+  already discarded by the old rule before this fix; entrance-time
+  behavior is unaffected (a misread entrance still always opens its own
+  new ticket, per the 2026-11-14 no-overwrite rule — the correction here
+  only ever happens when that ticket is later closed at exit).
+- See `docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md`;
   delete it once this entry is merged.

@@ -118,6 +118,7 @@
     "reweighOf": "Re-weigh of ticket #{{number}}",
     "reweighedBy": "Superseded by re-weigh ticket #{{number}}",
     "closedByDeduction": "Closed automatically by plate-misread deduction — the exit camera read \"{{misreadPlate}}\", one character off this ticket's plate. Double-check it.",
+    "closedByDeductionPlateCorrected": "The entry plate was corrected from \"{{correctedFromPlate}}\" to \"{{correctedToPlate}}\" — the exit reading was more confident at the differing character (or matched a recognized plate format) than the original entrance reading.",
     "closedViaTareByDeduction": "Resolved via this internal truck's tare — the camera read \"{{misreadPlate}}\", one character off its registered plate. Double-check it.",
     "auditTrail": "Audit trail"
   },

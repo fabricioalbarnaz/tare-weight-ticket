@@ -48,6 +48,34 @@ describe('TicketRepository', () => {
     expect(ticket.exitWeightKg).toBeNull();
   });
 
+  it('round-trips entryConfidenceLevel/entryPlateCharBelieve when provided', () => {
+    const ticket = repo.create({
+      plate: 'CONF0001',
+      entryAt: new Date('2026-01-01T10:00:00Z'),
+      entryWeightKg: 20000,
+      entryCameraId: 'cam-entrance-1',
+      entryCaptureFailed: false,
+      entryConfidenceLevel: 86,
+      entryPlateCharBelieve: [99, 98, 91, 98, 90, 90, 77],
+    });
+
+    expect(ticket.entryConfidenceLevel).toBe(86);
+    expect(JSON.parse(ticket.entryPlateCharBelieve!)).toEqual([99, 98, 91, 98, 90, 90, 77]);
+  });
+
+  it('leaves entryConfidenceLevel/entryPlateCharBelieve null when omitted', () => {
+    const ticket = repo.create({
+      plate: 'CONF0002',
+      entryAt: new Date('2026-01-01T10:00:00Z'),
+      entryWeightKg: 20000,
+      entryCameraId: 'cam-entrance-1',
+      entryCaptureFailed: false,
+    });
+
+    expect(ticket.entryConfidenceLevel).toBeNull();
+    expect(ticket.entryPlateCharBelieve).toBeNull();
+  });
+
   it('assigns increasing ticket numbers across creates and anomalies', () => {
     const first = repo.create({
       plate: 'AAA1111',
@@ -238,6 +266,45 @@ describe('TicketRepository', () => {
 
     expect(closed.status).toBe('CLOSED');
     expect(closed.netWeightKg).toBeNull();
+  });
+
+  it('corrects the plate on close when provided (plate-misread deduction, master plan §5/§11)', () => {
+    const created = repo.create({
+      plate: 'RL13H28',
+      entryAt: new Date('2026-01-01T08:00:00Z'),
+      entryWeightKg: 68360,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+
+    const closed = repo.close(created.id, {
+      exitAt: new Date('2026-01-01T09:00:00Z'),
+      exitWeightKg: 22640,
+      exitCameraId: 'cam-2',
+      exitCaptureFailed: false,
+      plate: 'RLI3H28',
+    });
+
+    expect(closed.plate).toBe('RLI3H28');
+  });
+
+  it('leaves the plate unchanged on close when no plate override is given', () => {
+    const created = repo.create({
+      plate: 'NOCHG001',
+      entryAt: new Date('2026-01-01T08:00:00Z'),
+      entryWeightKg: 20000,
+      entryCameraId: 'cam-1',
+      entryCaptureFailed: false,
+    });
+
+    const closed = repo.close(created.id, {
+      exitAt: new Date('2026-01-01T09:00:00Z'),
+      exitWeightKg: 8000,
+      exitCameraId: 'cam-2',
+      exitCaptureFailed: false,
+    });
+
+    expect(closed.plate).toBe('NOCHG001');
   });
 
   it('marks a CLOSED ticket as printed', () => {
@@ -557,8 +624,9 @@ describe('TicketRepository', () => {
       repo.appendAuditLog(deduced.id, 'system', 'closed_by_plate_deduction', {
         misreadPlate: 'DEDU9001',
         diffIndex: 3,
-        diffCharConfidence: 60,
-        otherCharsMinConfidence: 99,
+        matchedBy: 'confidence',
+        entryCharConfidence: 99,
+        exitCharConfidence: 60,
       });
 
       const normal = repo.create({
@@ -591,8 +659,9 @@ describe('TicketRepository', () => {
         tareWeightKg: 9000,
         misreadPlate: 'TDED9001',
         diffIndex: 3,
-        diffCharConfidence: 60,
-        otherCharsMinConfidence: 99,
+        matchedBy: 'confidence',
+        entryCharConfidence: 100,
+        exitCharConfidence: 60,
       });
 
       const normal = repo.create({

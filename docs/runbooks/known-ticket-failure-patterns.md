@@ -431,3 +431,33 @@ implementation.
 Tickets #744 (id 749) and #598 (id 603) above are **not** fixed by this
 feature — both are already well past any reasonable 24h eligibility
 window — and still need manual correction via the Admin UI.
+
+**Gap found and fixed (2026-11-24):** the 2026-11-18 fix above only ever
+checked the *incoming* reading's own confidence for an outlier, so it
+only caught a misread **exit**. Ticket #965 showed the symmetric case: the
+*entrance* misread the plate (`RL13H28`, confidence 86%) and the exit read
+it correctly (`RLI3H28`, confidence 97%) — since the exit's own reading
+was confident and not an outlier within itself, the old rule found no
+match and discarded the exit reading entirely (by then, also covered by
+the 2026-11-23 "exit discarded before weighing" feature, so the truck got
+nothing: no weight, no signal). Re-checking the *entrance's* own data with
+the same single-sided outlier rule wouldn't have caught it either — the
+entrance's weakest character was a different position (the last digit,
+77%) than the actually-misread one (91%, not an outlier within that same
+reading).
+
+The fix added two things, confirmed with the user: (1) the entrance
+reading's own confidence is now stored on the ticket
+(`entryConfidenceLevel`/`entryPlateCharBelieve`), so a later exit can
+directly compare **both sides'** confidence at the one differing
+character position, not just judge the incoming reading in isolation —
+whichever side is more confident there wins, no minimum margin required,
+and the ticket's `plate` is corrected when the entrance turns out to be
+the wrong one; and (2) plate-format validation (Brazil old/Mercosul,
+Argentina old/Mercosul, Uruguay) now runs *before* confidence and wins
+outright when exactly one side matches a recognized format — in this
+exact incident, `RL13H28` matches no recognized format (a digit sits
+where Mercosul requires a letter) while `RLI3H28` matches Mercosul
+exactly, so format alone would have resolved it. See master plan §5/§11
+"Plate-misread deduction: either side can be the misread one" and
+`docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md`.

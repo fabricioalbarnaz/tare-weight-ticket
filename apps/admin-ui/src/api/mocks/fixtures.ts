@@ -255,6 +255,26 @@ function buildInitialStore(): FixtureStore {
     closedViaTareByDeduction: true,
   });
 
+  // Bidirectional plate-misread deduction (master plan §5/§11,
+  // docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md): the
+  // entrance camera misread the plate ('1' instead of 'I'); the exit
+  // camera read it correctly, with higher confidence at the differing
+  // character, so the ticket's own plate was corrected to the exit's
+  // reading instead of the usual "exit was wrong" case.
+  const deductionPlateCorrected = makeTicket({
+    plate: 'RLI3H28',
+    status: 'CLOSED',
+    entryAt: hoursAgo(1.5),
+    entryWeightKg: 68360,
+    entryCameraId: 'cam-entrance-1',
+    exitAt: hoursAgo(0.9),
+    exitWeightKg: 22640,
+    exitCameraId: 'cam-exit-1',
+    netWeightKg: 45720,
+    printedAt: hoursAgo(0.9),
+    closedByDeduction: true,
+  });
+
   const tickets = [
     open,
     closed,
@@ -266,6 +286,7 @@ function buildInitialStore(): FixtureStore {
     reweigh,
     deductionClosed,
     tareDeductionClosed,
+    deductionPlateCorrected,
   ];
 
   const auditLog: AuditLogEntry[] = [
@@ -332,8 +353,9 @@ function buildInitialStore(): FixtureStore {
     makeAuditEntry(deductionClosed.id, 'system', 'closed_by_plate_deduction', {
       misreadPlate: 'RK76F83',
       diffIndex: 2,
-      diffCharConfidence: 67,
-      otherCharsMinConfidence: 99,
+      matchedBy: 'fallback',
+      entryCharConfidence: null,
+      exitCharConfidence: 67,
       weightKg: deductionClosed.exitWeightKg,
       cameraId: deductionClosed.exitCameraId,
     }),
@@ -342,12 +364,28 @@ function buildInitialStore(): FixtureStore {
       tareWeightKg: 9000,
       misreadPlate: 'ITD9001',
       diffIndex: 3,
-      diffCharConfidence: 60,
-      otherCharsMinConfidence: 99,
+      matchedBy: 'confidence',
+      entryCharConfidence: 100,
+      exitCharConfidence: 60,
     }),
     makeAuditEntry(tareDeductionClosed.id, 'system', 'exit_captured', {
       weightKg: tareDeductionClosed.exitWeightKg,
       cameraId: tareDeductionClosed.exitCameraId,
+    }),
+    makeAuditEntry(deductionPlateCorrected.id, 'system', 'entry_captured', {
+      weightKg: deductionPlateCorrected.entryWeightKg,
+      cameraId: deductionPlateCorrected.entryCameraId,
+    }),
+    makeAuditEntry(deductionPlateCorrected.id, 'system', 'closed_by_plate_deduction', {
+      misreadPlate: 'RLI3H28',
+      diffIndex: 2,
+      matchedBy: 'confidence',
+      entryCharConfidence: 91,
+      exitCharConfidence: 97,
+      correctedFromPlate: 'RL13H28',
+      correctedToPlate: 'RLI3H28',
+      weightKg: deductionPlateCorrected.exitWeightKg,
+      cameraId: deductionPlateCorrected.exitCameraId,
     }),
   ];
 

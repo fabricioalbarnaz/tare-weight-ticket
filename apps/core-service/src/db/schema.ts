@@ -16,6 +16,19 @@ export const tickets = sqliteTable('tickets', {
   entryWeightKg: real('entry_weight_kg'),
   entryCameraId: text('entry_camera_id'),
   entryCaptureFailed: integer('entry_capture_failed', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * The entrance camera read's own confidence, stored so a later exit
+   * reading's plate-misread deduction can compare *both* sides instead of
+   * only ever suspecting the exit — see master plan §5/§11 "Plate-misread
+   * deduction: either side can be the misread one" and
+   * docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md. Null for
+   * tickets created before this change, by an admin, or via the
+   * internal-truck tare path (which never produces an OPEN ticket this
+   * matters for).
+   */
+  entryConfidenceLevel: real('entry_confidence_level'),
+  /** JSON-encoded `number[]`, same convention as `raw_events.raw_payload` — per-character confidence paired with `entryConfidenceLevel` above. */
+  entryPlateCharBelieve: text('entry_plate_char_believe'),
 
   exitAt: integer('exit_at', { mode: 'timestamp_ms' }),
   exitWeightKg: real('exit_weight_kg'),

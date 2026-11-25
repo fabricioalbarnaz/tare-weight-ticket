@@ -614,8 +614,9 @@ describe('SessionService — exit', () => {
       expect(deductionPayload).toMatchObject({
         misreadPlate: 'PDC9001',
         diffIndex: 3,
-        diffCharConfidence: 60,
-        otherCharsMinConfidence: 99,
+        matchedBy: 'fallback',
+        entryCharConfidence: null,
+        exitCharConfidence: 60,
       });
     });
 
@@ -1258,7 +1259,13 @@ describe('SessionService — internal trucks (pre-registered tare)', () => {
       const payload = auditLogPayloadsFor(result.ticket.id).find(
         (entry) => entry.action === 'internal_truck_exit_via_tare_by_deduction',
       )?.payload;
-      expect(payload).toMatchObject({ misreadPlate: 'ITD9001', diffIndex: 3, diffCharConfidence: 60, otherCharsMinConfidence: 99 });
+      expect(payload).toMatchObject({
+        misreadPlate: 'ITD9001',
+        diffIndex: 3,
+        matchedBy: 'confidence',
+        entryCharConfidence: 100,
+        exitCharConfidence: 60,
+      });
     });
 
     it('closes via tare on an exit reading whose plate is a one-character misread of an active-tare truck', () => {

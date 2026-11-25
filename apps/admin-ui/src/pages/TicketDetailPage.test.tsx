@@ -88,6 +88,19 @@ describe('TicketDetailPage', () => {
     expect(banner.textContent).toContain('RK76F83');
   });
 
+  // See docs/plans/2026-11-24-bidirectional-plate-deduction-plan.md and
+  // master plan §5/§11. Fixture id 11 (ticketNumber #1011) is the
+  // deduction-closed ticket whose entry plate was itself the misread one.
+  it('shows the plate-correction line when the entrance turned out to be the misread side', async () => {
+    renderApp({ route: '/tickets/11' });
+    await loginAsAdmin();
+
+    await screen.findByRole('heading', { name: /ticket #1011/i });
+    const correctionBanner = await screen.findByText(/entry plate was corrected from/i);
+    expect(correctionBanner.textContent).toContain('RL13H28');
+    expect(correctionBanner.textContent).toContain('RLI3H28');
+  });
+
   it('reprints a closed ticket after confirmation', async () => {
     renderApp({ route: '/tickets/2' });
     const user = await loginAsAdmin();
