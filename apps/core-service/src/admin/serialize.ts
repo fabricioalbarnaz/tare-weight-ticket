@@ -1,4 +1,4 @@
-import type { RawEvent, Ticket, TicketAuditLogEntry } from '../tickets/repository.js';
+import type { RawEvent, Ticket, TicketAuditLogEntry, TimelineEntry } from '../tickets/repository.js';
 import type { Conjunto, InternalTruck, TruckAuditLogEntry, TruckConjuntoWithName } from '../trucks/repository.js';
 import type { AdminUser } from '../users/repository.js';
 
@@ -89,6 +89,54 @@ export function serializeRawEvent(event: RawEvent): SerializedRawEvent {
     rawPayload: JSON.parse(event.rawPayload),
     receivedAt: event.receivedAt.toISOString(),
     linkedTicketId: event.linkedTicketId,
+  };
+}
+
+/**
+ * A row of the unified entrance/exit timeline (see
+ * docs/plans/2026-11-26-unified-event-timeline-plan.md). `id` is composite
+ * (`"raw-123"`/`"audit-456"`) since raw-event and audit-log ids aren't
+ * unique across the two source tables. `discarded` is pulled out of the
+ * raw-event payload for convenience (the full payload is still included) —
+ * see `camera/routes.ts`'s `discarded:` fields.
+ */
+export interface SerializedTimelineEntry {
+  id: string;
+  kind: TimelineEntry['kind'];
+  timestamp: string;
+  plate: string | null;
+  ticketId: number | null;
+  source?: RawEvent['source'];
+  discarded?: string;
+  action?: string;
+  actor?: string;
+  payload: unknown;
+}
+
+export function serializeTimelineEntry(entry: TimelineEntry): SerializedTimelineEntry {
+  if (entry.kind === 'raw_event') {
+    const payload = JSON.parse(entry.rawPayload) as { discarded?: unknown };
+    return {
+      id: `raw-${entry.id}`,
+      kind: 'raw_event',
+      timestamp: entry.timestamp.toISOString(),
+      plate: entry.plate,
+      ticketId: entry.ticketId,
+      source: entry.source,
+      discarded: typeof payload.discarded === 'string' ? payload.discarded : undefined,
+      payload,
+    };
+  }
+
+  return {
+    id: `audit-${entry.id}`,
+    kind: 'audit_log',
+    timestamp: entry.timestamp.toISOString(),
+    plate: entry.plate,
+    ticketId: entry.ticketId,
+    action: entry.action,
+    actor: entry.actor,
+    payload: entry.payload ? JSON.parse(entry.payload) : null,
   };
 }
 

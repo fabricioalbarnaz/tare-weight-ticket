@@ -15,6 +15,7 @@ import type {
   ReprintPayload,
   ResetPasswordPayload,
   Ticket,
+  TimelineEntry,
   TruckConjunto,
   UpdateUserPayload,
   User,
@@ -357,6 +358,74 @@ export const handlers = [
     items = [...items].sort((a, b) => b.id - a.id);
 
     return HttpResponse.json(paginate(items, page, pageSize));
+  }),
+
+  // Unified entrance/exit timeline (docs/plans/2026-11-26-unified-event-timeline-plan.md):
+  // merges raw camera/scale events with ticket audit log entries, same as
+  // the real `listTimelineEvents` repository method.
+  http.get(`${BASE}/timeline`, ({ request }) => {
+    const guard = adminGuard();
+    if (guard) return guard;
+
+    const url = new URL(request.url);
+    const plateUpper = url.searchParams.get('plate')?.toUpperCase() || null;
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    const page = Number(url.searchParams.get('page') ?? '1');
+    const pageSize = Number(url.searchParams.get('pageSize') ?? '20');
+
+    function ticketPlate(ticketId: number | null): string | null {
+      if (ticketId === null) return null;
+      return store.tickets.find((t) => t.id === ticketId)?.plate ?? null;
+    }
+
+    function payloadPlate(rawPayload: unknown): string | null {
+      if (rawPayload && typeof rawPayload === 'object') {
+        const p = rawPayload as { plate?: unknown; rawPlate?: unknown };
+        if (typeof p.plate === 'string' && p.plate) return p.plate;
+        if (typeof p.rawPlate === 'string' && p.rawPlate) return p.rawPlate;
+      }
+      return null;
+    }
+
+    let entries: TimelineEntry[] = [
+      ...store.rawEvents.map((e): TimelineEntry => {
+        const payload = e.rawPayload as { discarded?: unknown } | null;
+        const discarded = payload && typeof payload.discarded === 'string' ? payload.discarded : undefined;
+        return {
+          id: `raw-${e.id}`,
+          kind: 'raw_event',
+          timestamp: e.receivedAt,
+          source: e.source,
+          discarded,
+          plate: ticketPlate(e.linkedTicketId) ?? payloadPlate(e.rawPayload),
+          ticketId: e.linkedTicketId,
+          payload: e.rawPayload,
+        };
+      }),
+      ...store.auditLog.map(
+        (a): TimelineEntry => ({
+          id: `audit-${a.id}`,
+          kind: 'audit_log',
+          timestamp: a.createdAt,
+          action: a.action,
+          actor: a.actor,
+          plate: ticketPlate(a.ticketId),
+          ticketId: a.ticketId,
+          payload: a.payload,
+        }),
+      ),
+    ];
+
+    if (plateUpper) {
+      entries = entries.filter((e) => e.plate?.toUpperCase().includes(plateUpper));
+    }
+    if (from) entries = entries.filter((e) => e.timestamp >= from);
+    if (to) entries = entries.filter((e) => e.timestamp <= to);
+
+    entries.sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0));
+
+    return HttpResponse.json(paginate(entries, page, pageSize));
   }),
 
   http.get(`${BASE}/status`, () => {

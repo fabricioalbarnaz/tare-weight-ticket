@@ -85,6 +85,33 @@ export interface RawEvent {
   linkedTicketId: number | null;
 }
 
+/**
+ * One row of the unified entrance/exit timeline (see
+ * docs/plans/2026-11-26-unified-event-timeline-plan.md). `id` is composite
+ * (`"raw-123"`/`"audit-456"`) — raw-event and audit-log ids aren't unique
+ * across the two source tables they come from.
+ */
+export interface TimelineEntry {
+  id: string;
+  kind: 'raw_event' | 'audit_log';
+  timestamp: string;
+  plate: string | null;
+  ticketId: number | null;
+  source?: RawEventSource;
+  discarded?: string;
+  action?: string;
+  actor?: string;
+  payload: unknown;
+}
+
+export interface TimelineQuery {
+  plate?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface Paginated<T> {
   items: T[];
   total: number;

@@ -710,6 +710,107 @@ describe('TicketRepository', () => {
     });
   });
 
+  describe('listTimelineEvents', () => {
+    it('interleaves a linked raw event with its ticket audit log entries, newest first', () => {
+      const ticket = repo.create({
+        plate: 'TMLN0001',
+        entryAt: new Date('2026-01-01T10:00:00Z'),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.recordRawEvent('camera_entrance', { plate: 'TMLN0001', rawPlate: 'TMLN0001' }, ticket.id);
+      repo.appendAuditLog(ticket.id, 'system', 'entry_captured', { weightKg: 1000 });
+
+      const result = repo.listTimelineEvents({ plate: 'TMLN0001' });
+
+      expect(result.total).toBe(2);
+      expect(result.items.map((e) => e.kind)).toEqual(['audit_log', 'raw_event']);
+      expect(result.items.every((e) => e.ticketId === ticket.id)).toBe(true);
+      expect(result.items.every((e) => e.plate === 'TMLN0001')).toBe(true);
+    });
+
+    it('finds a discarded camera raw event (no linked ticket) by its own payload plate', () => {
+      repo.recordRawEvent('camera_exit', {
+        rawPlate: 'TMLN0002',
+        cameraId: 'cam-exit-1',
+        discarded: 'no_matching_ticket_for_exit',
+      });
+
+      const result = repo.listTimelineEvents({ plate: 'TMLN0002' });
+
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.kind).toBe('raw_event');
+      expect(result.items[0]?.ticketId).toBeNull();
+      expect(result.items[0]?.plate).toBe('TMLN0002');
+    });
+
+    it('finds a scale raw event (no plate of its own) via its linked ticket', () => {
+      const ticket = repo.create({
+        plate: 'TMLN0003',
+        entryAt: new Date('2026-01-01T10:00:00Z'),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.recordRawEvent('scale', { direction: 'entrance', weightKg: 1000 }, ticket.id);
+
+      const result = repo.listTimelineEvents({ plate: 'TMLN0003' });
+
+      expect(result.total).toBe(1);
+      expect(result.items[0]?.kind).toBe('raw_event');
+      expect(result.items[0]?.plate).toBe('TMLN0003');
+    });
+
+    it('does not match an unrelated plate', () => {
+      repo.recordRawEvent('camera_entrance', { rawPlate: 'TMLN0004', cameraId: 'cam-1' });
+
+      const result = repo.listTimelineEvents({ plate: 'OTHER999' });
+
+      expect(result.total).toBe(0);
+    });
+
+    it('filters by from/to, inclusive', () => {
+      const ticket = repo.create({
+        plate: 'TMLN0005',
+        entryAt: new Date('2026-01-01T10:00:00Z'),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(ticket.id, 'system', 'entry_captured', { weightKg: 1000 });
+      const [onlyEntry] = repo.findAuditLogByTicketId(ticket.id);
+
+      const inRange = repo.listTimelineEvents({ from: onlyEntry!.createdAt, to: onlyEntry!.createdAt });
+      expect(inRange.total).toBe(1);
+
+      const before = new Date(onlyEntry!.createdAt.getTime() - 1000);
+      const outOfRange = repo.listTimelineEvents({ from: before, to: before });
+      expect(outOfRange.total).toBe(0);
+    });
+
+    it('paginates the merged, sorted set', () => {
+      const ticket = repo.create({
+        plate: 'TMLN0006',
+        entryAt: new Date('2026-01-01T10:00:00Z'),
+        entryWeightKg: 1000,
+        entryCameraId: 'cam-1',
+        entryCaptureFailed: false,
+      });
+      repo.appendAuditLog(ticket.id, 'system', 'entry_captured', { weightKg: 1000 });
+      repo.appendAuditLog(ticket.id, 'system', 'exit_captured', { weightKg: 500 });
+      repo.appendAuditLog(ticket.id, 'system', 'anomaly_flagged', {});
+
+      const page1 = repo.listTimelineEvents({ plate: 'TMLN0006', page: 1, pageSize: 2 });
+      const page2 = repo.listTimelineEvents({ plate: 'TMLN0006', page: 2, pageSize: 2 });
+
+      expect(page1.total).toBe(3);
+      expect(page1.items).toHaveLength(2);
+      expect(page2.items).toHaveLength(1);
+      expect(page1.items[0]?.id).not.toBe(page2.items[0]?.id);
+    });
+  });
+
   describe('findAuditLogByTicketId', () => {
     it('returns audit entries for a ticket, most-recent-first', () => {
       const ticket = repo.create({

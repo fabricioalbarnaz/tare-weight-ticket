@@ -11,9 +11,12 @@ describe('UnresolvedEventsPage', () => {
     await user.click(await screen.findByRole('link', { name: /unresolved events/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/entrance camera/i)).toBeInTheDocument();
+      // Two unresolved entrance-camera rows in the fixtures: an unreadable
+      // plate and a discarded duplicate-plate read (neither gets a linked
+      // ticket, so both surface here, same as the real backend).
+      expect(screen.getAllByText(/entrance camera/i).length).toBeGreaterThanOrEqual(2);
       expect(screen.getByText(/exit camera/i)).toBeInTheDocument();
     });
-    expect(screen.getAllByRole('link', { name: /create ticket/i })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: /create ticket/i })).toHaveLength(3);
   });
 });

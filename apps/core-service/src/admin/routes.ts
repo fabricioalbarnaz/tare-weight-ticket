@@ -24,6 +24,7 @@ import {
   editExitBodySchema,
   editTruckPlateBodySchema,
   listTicketsQuerySchema,
+  listTimelineQuerySchema,
   listUnresolvedEventsQuerySchema,
   loginBodySchema,
   reprintBodySchema,
@@ -43,6 +44,7 @@ import {
   type EditExitBody,
   type EditTruckPlateBody,
   type ListTicketsQuery,
+  type ListTimelineQuery,
   type ListUnresolvedEventsQuery,
   type LoginBody,
   type ReprintBody,
@@ -59,6 +61,7 @@ import {
   serializeCurrentUser,
   serializeRawEvent,
   serializeTicket,
+  serializeTimelineEntry,
   serializeTruck,
   serializeTruckAuditLogEntry,
   serializeUser,
@@ -111,6 +114,19 @@ const TRUCK_AUDIT_ACTIONS = {
   CONJUNTO_ASSIGNED: 'conjunto_assigned',
   CONJUNTO_ACTIVATED: 'conjunto_activated',
 } as const;
+
+/**
+ * `/timeline`'s default date window when neither `from`/`to` nor `plate`
+ * narrow the query — see docs/plans/2026-11-26-unified-event-timeline-plan.md.
+ * Local server time, same as every other entry/exit timestamp in this
+ * system.
+ */
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+function endOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
 
 /**
  * Admin API for the Admin UI (master plan §3.4, §9 Phase 6, §11). Mounted
@@ -476,6 +492,38 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           const result = options.repo.listUnresolvedEvents(request.query);
           reply.send({
             items: result.items.map(serializeRawEvent),
+            total: result.total,
+            page: result.page,
+            pageSize: result.pageSize,
+          });
+        },
+      );
+
+      // --- Timeline (docs/plans/2026-11-26-unified-event-timeline-plan.md) ---
+
+      instance.get<{ Querystring: ListTimelineQuery }>(
+        '/timeline',
+        { schema: { querystring: listTimelineQuerySchema }, preHandler: requireAdmin },
+        async (request, reply) => {
+          const { plate, from, to, page, pageSize } = request.query;
+          // Default to "today" only when nothing else narrows the query —
+          // an explicit plate search is left unbounded by date, and an
+          // explicit from/to is used exactly as given (not padded to a
+          // full day on the other side).
+          const noBoundsGiven = !from && !to;
+          const now = new Date();
+          const defaultFrom = noBoundsGiven && !plate ? startOfDay(now) : undefined;
+          const defaultTo = noBoundsGiven && !plate ? endOfDay(now) : undefined;
+
+          const result = options.repo.listTimelineEvents({
+            plate,
+            from: from ? new Date(from) : defaultFrom,
+            to: to ? new Date(to) : defaultTo,
+            page,
+            pageSize,
+          });
+          reply.send({
+            items: result.items.map(serializeTimelineEntry),
             total: result.total,
             page: result.page,
             pageSize: result.pageSize,

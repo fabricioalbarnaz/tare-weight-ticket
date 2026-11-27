@@ -19,6 +19,8 @@ import type {
   Ticket,
   TicketDetail,
   TicketListQuery,
+  TimelineEntry,
+  TimelineQuery,
   Truck,
   TruckDetail,
   UpdateUserPayload,
@@ -58,9 +60,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function toQueryString(query: TicketListQuery): string {
+function toQueryString(query: object): string {
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
+  for (const [key, value] of Object.entries(query as Record<string, string | number | undefined>)) {
     if (value !== undefined && value !== '') {
       params.set(key, String(value));
     }
@@ -112,6 +114,10 @@ export const api = {
     pageSize?: number;
   }): Promise<Paginated<RawEvent>> {
     return request(`/unresolved-events${toQueryString(query)}`);
+  },
+
+  listTimeline(query: TimelineQuery): Promise<Paginated<TimelineEntry>> {
+    return request(`/timeline${toQueryString(query)}`);
   },
 
   status(): Promise<HardwareStatus> {

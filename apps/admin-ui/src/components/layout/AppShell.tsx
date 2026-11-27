@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { to: '/', labelKey: 'nav.dashboard', adminOnly: true },
   { to: '/operation', labelKey: 'nav.operation', adminOnly: false },
   { to: '/history', labelKey: 'nav.history', adminOnly: true },
+  { to: '/timeline', labelKey: 'nav.timeline', adminOnly: true },
   { to: '/unresolved-events', labelKey: 'nav.unresolvedEvents', adminOnly: true },
   { to: '/internal-trucks', labelKey: 'nav.internalTrucks', adminOnly: true },
   { to: '/status', labelKey: 'nav.hardwareStatus', adminOnly: true },

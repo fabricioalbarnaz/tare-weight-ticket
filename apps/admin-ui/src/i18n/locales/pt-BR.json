@@ -18,6 +18,7 @@
     "dashboard": "Painel",
     "operation": "Operação",
     "history": "Histórico",
+    "timeline": "Linha do Tempo",
     "unresolvedEvents": "Eventos Não Resolvidos",
     "internalTrucks": "Caminhões Internos",
     "hardwareStatus": "Status do Equipamento",
@@ -134,6 +135,34 @@
       "camera_entrance": "Câmera de entrada",
       "camera_exit": "Câmera de saída",
       "scale": "Balança"
+    }
+  },
+  "timeline": {
+    "title": "Linha do tempo",
+    "description": "Tudo que o sistema fez para uma placa ou período: leituras de câmera e balança (aceitas e descartadas) e as decisões de negócio tomadas a partir delas.",
+    "loadError": "Não foi possível carregar a linha do tempo.",
+    "empty": "Nenhum evento encontrado para este filtro.",
+    "previous": "Anterior",
+    "next": "Próxima",
+    "pageOf": "Página {{page}} de {{totalPages}} ({{total}} eventos)",
+    "filters": {
+      "plate": "Placa",
+      "platePlaceholder": "Buscar por placa…",
+      "from": "De",
+      "to": "Até",
+      "todayNote": "Sem filtro de placa ou data, mostra apenas hoje."
+    },
+    "ticketLink": "Ticket #{{ticketId}}",
+    "noTicket": "Sem ticket vinculado",
+    "kind": {
+      "raw_event": "Evento bruto",
+      "audit_log": "Decisão do sistema"
+    },
+    "discarded": {
+      "post_release_debounce": "Descartado — dentro da janela de debounce pós-liberação",
+      "duplicate_plate_read": "Descartado — leitura duplicada da mesma placa",
+      "preempted_by_new_plate": "Descartado — captura interrompida por uma nova placa",
+      "no_matching_ticket_for_exit": "Descartado — nenhum ticket correspondente para esta saída"
     }
   },
   "internalTrucks": {

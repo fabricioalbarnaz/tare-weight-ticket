@@ -11,6 +11,7 @@ import { InternalTrucksPage } from './pages/InternalTrucksPage';
 import { LoginPage } from './pages/LoginPage';
 import { OperationPage } from './pages/OperationPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
+import { TimelinePage } from './pages/TimelinePage';
 import { TruckDetailPage } from './pages/TruckDetailPage';
 import { UnresolvedEventsPage } from './pages/UnresolvedEventsPage';
 import { UserDetailPage } from './pages/UserDetailPage';
@@ -32,6 +33,7 @@ export function AppRoutes() {
           <Route element={<RequireAdmin />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/history" element={<HistoryPage />} />
+            <Route path="/timeline" element={<TimelinePage />} />
             <Route path="/unresolved-events" element={<UnresolvedEventsPage />} />
             <Route path="/status" element={<HardwareStatusPage />} />
             <Route path="/internal-trucks" element={<InternalTrucksPage />} />

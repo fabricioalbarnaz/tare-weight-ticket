@@ -18,6 +18,7 @@
     "dashboard": "Dashboard",
     "operation": "Operation",
     "history": "History",
+    "timeline": "Timeline",
     "unresolvedEvents": "Unresolved Events",
     "internalTrucks": "Internal Trucks",
     "hardwareStatus": "Hardware Status",
@@ -134,6 +135,34 @@
       "camera_entrance": "Entrance camera",
       "camera_exit": "Exit camera",
       "scale": "Scale"
+    }
+  },
+  "timeline": {
+    "title": "Timeline",
+    "description": "Everything the system did for a plate or time window: camera/scale reads (accepted and discarded) and the business decisions made from them.",
+    "loadError": "Could not load the timeline.",
+    "empty": "No events found for this filter.",
+    "previous": "Previous",
+    "next": "Next",
+    "pageOf": "Page {{page}} of {{totalPages}} ({{total}} events)",
+    "filters": {
+      "plate": "Plate",
+      "platePlaceholder": "Search by plate…",
+      "from": "From",
+      "to": "To",
+      "todayNote": "With no plate or date filter, only today is shown."
+    },
+    "ticketLink": "Ticket #{{ticketId}}",
+    "noTicket": "No linked ticket",
+    "kind": {
+      "raw_event": "Raw event",
+      "audit_log": "System decision"
+    },
+    "discarded": {
+      "post_release_debounce": "Discarded — inside the post-release debounce window",
+      "duplicate_plate_read": "Discarded — duplicate read of the same plate",
+      "preempted_by_new_plate": "Discarded — capture interrupted by a new plate",
+      "no_matching_ticket_for_exit": "Discarded — no matching ticket for this exit"
     }
   },
   "internalTrucks": {

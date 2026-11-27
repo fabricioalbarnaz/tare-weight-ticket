@@ -463,6 +463,46 @@ describe('GET /api/admin/unresolved-events', () => {
   });
 });
 
+describe('GET /api/admin/timeline', () => {
+  it('merges raw events and audit log entries for a plate, newest first', async () => {
+    const cookie = await loginCookie();
+    const ticket = createOpenTicket('TMLN0010');
+    repo.recordRawEvent('camera_entrance', { plate: 'TMLN0010', rawPlate: 'TMLN0010' }, ticket.id);
+    repo.appendAuditLog(ticket.id, 'system', 'entry_captured', { weightKg: 20000 });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/admin/timeline?plate=TMLN0010',
+      headers: { cookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.total).toBe(2);
+    expect(body.items.map((item: { kind: string }) => item.kind)).toEqual(['audit_log', 'raw_event']);
+    expect(body.items.every((item: { plate: string }) => item.plate === 'TMLN0010')).toBe(true);
+  });
+
+  it('includes a discarded camera event with no linked ticket', async () => {
+    const cookie = await loginCookie();
+    repo.recordRawEvent('camera_exit', {
+      rawPlate: 'TMLN0011',
+      discarded: 'no_matching_ticket_for_exit',
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/admin/timeline?plate=TMLN0011',
+      headers: { cookie },
+    });
+
+    const body = response.json();
+    expect(body.total).toBe(1);
+    expect(body.items[0].discarded).toBe('no_matching_ticket_for_exit');
+    expect(body.items[0].ticketId).toBeNull();
+  });
+});
+
 describe('GET /api/admin/status', () => {
   it('reports the hardware status of every component', async () => {
     const cookie = await loginCookie();
@@ -857,6 +897,7 @@ describe('profiles and session revalidation', () => {
       '/api/admin/status',
       '/api/admin/trucks',
       '/api/admin/unresolved-events',
+      '/api/admin/timeline',
       '/api/admin/users',
     ]) {
       const response = await app.inject({ method: 'GET', url, headers: { cookie } });

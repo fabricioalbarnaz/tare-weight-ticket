@@ -404,6 +404,21 @@ function buildInitialStore(): FixtureStore {
       receivedAt: hoursAgo(0.25),
       linkedTicketId: null,
     },
+    // Discarded (docs/plans/2026-11-26-unified-event-timeline-plan.md,
+    // docs/plans/2026-11-12-camera-duplicate-plate-debounce-plan.md) — for
+    // the Timeline screen's "discarded" display, never gets a linked ticket.
+    {
+      id: nextRawEventId++,
+      source: 'camera_entrance',
+      rawPayload: {
+        rawPlate: 'ABC1234',
+        cameraId: 'cam-entrance-1',
+        discarded: 'duplicate_plate_read',
+        msSinceLastSameDirectionRead: 45_000,
+      },
+      receivedAt: hoursAgo(0.1),
+      linkedTicketId: null,
+    },
   ];
 
   const status: HardwareStatus = {

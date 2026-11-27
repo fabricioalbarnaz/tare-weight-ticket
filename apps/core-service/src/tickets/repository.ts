@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, like, lte, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql } from 'drizzle-orm';
 import {
   tickets,
   ticketAuditLog,
@@ -51,7 +51,65 @@ export interface ListUnresolvedEventsQuery {
   pageSize?: number;
 }
 
+export interface ListTimelineEventsQuery {
+  /** Substring match (case-insensitive), against either the linked ticket's plate or a discarded event's own payload plate. */
+  plate?: string;
+  from?: Date;
+  to?: Date;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * One row of the unified entrance/exit timeline (see
+ * docs/plans/2026-11-26-unified-event-timeline-plan.md) — either a raw
+ * camera/scale event (accepted or discarded) or a business decision from
+ * `ticket_audit_log`. `rawPayload`/`payload` are left as the raw JSON
+ * string, matching `RawEvent`/`TicketAuditLogEntry` — parsed only at
+ * serialize time, same as everywhere else in this file.
+ */
+export type TimelineEntry =
+  | {
+      kind: 'raw_event';
+      id: number;
+      timestamp: Date;
+      source: RawEventSource;
+      rawPayload: string;
+      ticketId: number | null;
+      plate: string | null;
+    }
+  | {
+      kind: 'audit_log';
+      id: number;
+      timestamp: Date;
+      action: string;
+      actor: string;
+      payload: string | null;
+      ticketId: number;
+      plate: string | null;
+    };
+
 const DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Best-effort plate for a raw event with no linked ticket (a discarded
+ * camera read never gets one) — `cameraRawPayload`/`checkPostReleaseDebounce`
+ * et al. all write either a corrected `plate` or the original `rawPlate`.
+ * A `scale`-source payload has neither (see `session-service.ts`'s
+ * `recordRawEvent('scale', ...)` calls) and returns null here — those rows
+ * are always linked to a ticket in practice, so their plate comes from the
+ * join instead.
+ */
+function extractPlateFromRawPayload(rawPayload: string): string | null {
+  try {
+    const parsed = JSON.parse(rawPayload) as { plate?: unknown; rawPlate?: unknown };
+    const plate = typeof parsed.plate === 'string' ? parsed.plate : undefined;
+    const rawPlate = typeof parsed.rawPlate === 'string' ? parsed.rawPlate : undefined;
+    return plate || rawPlate || null;
+  } catch {
+    return null;
+  }
+}
 
 export interface CreateTicketInput {
   plate: string;
@@ -114,6 +172,15 @@ export interface TicketRepository {
   findById(ticketId: number): Ticket | undefined;
   listTickets(query: ListTicketsQuery): Paginated<TicketListItem>;
   listUnresolvedEvents(query: ListUnresolvedEventsQuery): Paginated<RawEvent>;
+  /**
+   * The unified entrance/exit timeline (master plan §11, see
+   * docs/plans/2026-11-26-unified-event-timeline-plan.md): raw camera/scale
+   * events (accepted and discarded) interleaved with business-decision
+   * audit log entries, newest first. Bounded by `from`/`to` when given —
+   * callers (the admin route) are expected to default that to a single day
+   * rather than querying unbounded history.
+   */
+  listTimelineEvents(query: ListTimelineEventsQuery): Paginated<TimelineEntry>;
   findAuditLogByTicketId(ticketId: number): TicketAuditLogEntry[];
   /** Timestamp of the most recent raw event received from this source, or null if none ever arrived. */
   findLastEventTimestamp(source: RawEventSource): Date | null;
@@ -345,6 +412,88 @@ export function createTicketRepository(db: Db, events: TicketEvents = createTick
       const { total } = db.select({ total: count() }).from(rawEvents).where(where).get() ?? {
         total: 0,
       };
+
+      return { items, total, page, pageSize };
+    },
+
+    listTimelineEvents(query) {
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+      const plateUpper = query.plate ? query.plate.toUpperCase() : undefined;
+
+      const rawConditions = [];
+      if (query.from) rawConditions.push(gte(rawEvents.receivedAt, query.from));
+      if (query.to) rawConditions.push(lte(rawEvents.receivedAt, query.to));
+      // A raw event's plate comes from its linked ticket when there is one;
+      // a discarded event (no linked ticket) only has its own payload, so
+      // both sides are checked — see `extractPlateFromRawPayload`.
+      if (plateUpper) {
+        rawConditions.push(
+          or(
+            like(sql`upper(${tickets.plate})`, `%${plateUpper}%`),
+            like(sql`upper(${rawEvents.rawPayload})`, `%${plateUpper}%`),
+          ),
+        );
+      }
+      const rawRows = db
+        .select({
+          id: rawEvents.id,
+          source: rawEvents.source,
+          rawPayload: rawEvents.rawPayload,
+          receivedAt: rawEvents.receivedAt,
+          linkedTicketId: rawEvents.linkedTicketId,
+          ticketPlate: tickets.plate,
+        })
+        .from(rawEvents)
+        .leftJoin(tickets, eq(rawEvents.linkedTicketId, tickets.id))
+        .where(rawConditions.length > 0 ? and(...rawConditions) : undefined)
+        .all();
+
+      const auditConditions = [];
+      if (query.from) auditConditions.push(gte(ticketAuditLog.createdAt, query.from));
+      if (query.to) auditConditions.push(lte(ticketAuditLog.createdAt, query.to));
+      if (plateUpper) auditConditions.push(like(sql`upper(${tickets.plate})`, `%${plateUpper}%`));
+      const auditRows = db
+        .select({
+          id: ticketAuditLog.id,
+          ticketId: ticketAuditLog.ticketId,
+          actor: ticketAuditLog.actor,
+          action: ticketAuditLog.action,
+          payload: ticketAuditLog.payload,
+          createdAt: ticketAuditLog.createdAt,
+          plate: tickets.plate,
+        })
+        .from(ticketAuditLog)
+        .innerJoin(tickets, eq(ticketAuditLog.ticketId, tickets.id))
+        .where(auditConditions.length > 0 ? and(...auditConditions) : undefined)
+        .all();
+
+      const entries: TimelineEntry[] = [
+        ...rawRows.map((row): TimelineEntry => ({
+          kind: 'raw_event',
+          id: row.id,
+          timestamp: row.receivedAt,
+          source: row.source,
+          rawPayload: row.rawPayload,
+          ticketId: row.linkedTicketId,
+          plate: row.ticketPlate ?? extractPlateFromRawPayload(row.rawPayload),
+        })),
+        ...auditRows.map((row): TimelineEntry => ({
+          kind: 'audit_log',
+          id: row.id,
+          timestamp: row.createdAt,
+          action: row.action,
+          actor: row.actor,
+          payload: row.payload,
+          ticketId: row.ticketId,
+          plate: row.plate,
+        })),
+      ];
+      entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime() || b.id - a.id);
+
+      const total = entries.length;
+      const start = (page - 1) * pageSize;
+      const items = entries.slice(start, start + pageSize);
 
       return { items, total, page, pageSize };
     },

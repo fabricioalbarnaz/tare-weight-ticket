@@ -39,6 +39,19 @@ export const listUnresolvedEventsQuerySchema = {
   additionalProperties: false,
 } as const;
 
+/** See docs/plans/2026-11-26-unified-event-timeline-plan.md. */
+export const listTimelineQuerySchema = {
+  type: 'object',
+  properties: {
+    plate: { type: 'string' },
+    from: { type: 'string', format: 'date-time' },
+    to: { type: 'string', format: 'date-time' },
+    page: { type: 'integer', minimum: 1 },
+    pageSize: { type: 'integer', minimum: 1, maximum: 200 },
+  },
+  additionalProperties: false,
+} as const;
+
 export const createTicketBodySchema = {
   type: 'object',
   properties: {
@@ -165,6 +178,14 @@ export interface ListTicketsQuery {
 
 export interface ListUnresolvedEventsQuery {
   source?: 'camera_entrance' | 'camera_exit' | 'scale';
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListTimelineQuery {
+  plate?: string;
+  from?: string;
+  to?: string;
   page?: number;
   pageSize?: number;
 }
